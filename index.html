@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan Lobo - V7.9 Sincronización Definitiva</title>
+    
+    <!-- LIBRERÍAS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
+        .panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
+        .input-dark { 
+            background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 6px; width: 100%; display: block; 
+            appearance: none; -webkit-appearance: none; cursor: pointer;
+        }
+        .input-dark::-webkit-calendar-picker-indicator { filter: invert(1); }
+        .btn { padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.2s; text-align: center; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-success { background: #16a34a; color: white; }
+        .btn-danger { background: #dc2626; color: white; }
+        .btn-ghost { background: transparent; border: 1px solid #475569; color: #94a3b8; }
+        .btn-ghost:hover { background: #334155; color: white; }
+        
+        /* Animaciones */
+        @keyframes confetti-fall { 0% { transform: translateY(-100vh) rotate(0deg); } 100% { transform: translateY(100vh) rotate(720deg); } }
+        .confetti { position: fixed; top: -10px; width: 10px; height: 10px; z-index: 100; animation: confetti-fall 3s linear forwards; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; justify-content: center; items-center: center; z-index: 50; padding: 20px; }
+        .modal-content { background: #1e293b; padding: 24px; border-radius: 12px; width: 100%; max-width: 600px; border: 1px solid #475569; max-height: 90vh; overflow-y: auto; margin-top: 5vh; }
+        .digital-clock { font-variant-numeric: tabular-nums; letter-spacing: 0.05em; text-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
+        
+        /* Loader con timeout visual */
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Tooltip en gráficas */
+        .chart-bar:hover { opacity: 0.8; }
+        .chart-group:hover .chart-tooltip { display: block; }
+        
+        /* Scrollbars para tablas largas */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+
+    <!-- FIREBASE MODULES -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.2.0",
+          "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+          "firebase/app": "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js"
+        }
+      }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+        import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection } from 'firebase/firestore';
+
+        // --- 1. CONFIGURACIÓN FIREBASE & APP ID ---
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // --- 2. DATOS INICIALES ---
+        const INITIAL_BUDGET_CONFIG = {
+            "ESENCIALES": { limit: 12000, categories: { "HIPOTECA": 3600, "SERVICIOS": 1000, "DESPENSA": 1000, "SGMM": 1700, "PERLA": 2000, "SEGURO CARRO": 650, "COMPRAS": 650, "PRESTAMO PERSONAL": 1400 } },
+            "PERSONALES": { limit: 4800, categories: { "TDC": 2000, "SUSCRIPCIONES": 800, "SALIDAS": 1000, "COMPRAS": 1000 } },
+            "AHORRO": { limit: 7200, categories: { "PPR": 3200, "AHORRO GENERAL": 4000 } }
+        };
+
+        const INITIAL_DATA = {
+            assets: [
+                { id: 1, name: "Casa MTY", value: 2000000, type: "real_estate" },
+                { id: 2, name: "Casa Oaxaca", value: 450000, type: "real_estate" },
+                { id: 3, name: "PPR Allianz", value: 53272, type: "investment" },
+                { id: 4, name: "GBM (SPLG)", value: 46000, type: "investment" },
+                { id: 5, name: "Fondo Emergencia", value: 35000, type: "cash" },
+                { id: 6, name: "Afore", value: 300000, type: "investment" },
+                { id: 7, name: "CIJubilate", value: 760000, type: "investment" },
+                { id: 8, name: "CETES / Udibonos", value: 0, type: "investment" },
+                { id: 9, name: "Fondo Viajes", value: 500, type: "cash" }
+            ],
+            debts: [
+                { id: 101, name: "Préstamo Personal (32%)", value: 150000, rate: 32, type: "toxic" },
+                { id: 102, name: "Hipoteca MTY (8.7%)", value: 260000, rate: 8.7, type: "good" }
+            ],
+            budgetConfig: INITIAL_BUDGET_CONFIG, 
+            transactions: [], incomes: [], highestNetWorth: 0,
+            targetDate: "2041-11-03"
+        };
+
+        // --- 3. GRÁFICAS SVG ---
+        const SimplePieChart = ({ data }) => {
+            const total = data.reduce((acc, item) => acc + item.value, 0);
+            let currentAngle = 0;
+            if (total === 0) return <div className="flex h-full items-center justify-center text-gray-500">Sin datos</div>;
+            return (
+                <div className="flex flex-col items-center justify-center h-full">
+                    <div className="relative w-40 h-40 rounded-full overflow-hidden border-4 border-slate-700" 
+                         style={{ background: `conic-gradient(${data.map(item => { const start = currentAngle; const percentage = (item.value / total) * 100; const end = currentAngle + percentage; currentAngle = end; return `${item.fill} ${start}% ${end}%`; }).join(', ')})` }}>
+                        <div className="absolute inset-0 m-auto w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center border-4 border-slate-700"><span className="text-xs font-bold text-gray-400">Total</span></div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                        {data.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-1"><div className="w-3 h-3 rounded-full" style={{backgroundColor: item.fill}}></div><span>{item.name} ({Math.round((item.value/total)*100)}%)</span></div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const SimpleBarChart = ({ data }) => {
+            const maxValue = Math.max(...data.map(d => d.value), 1);
+            return (
+                <div className="flex flex-col gap-2 h-full overflow-y-auto pr-2">
+                    {data.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-xs">
+                            <div className="w-24 truncate text-right text-gray-400" title={item.name}>{item.name}</div>
+                            <div className="flex-1 h-4 bg-slate-800 rounded overflow-hidden relative">
+                                <div className="h-full rounded" style={{ width: `${(item.value / maxValue) * 100}%`, backgroundColor: idx % 2 === 0 ? '#8b5cf6' : '#6366f1' }}></div>
+                            </div>
+                            <div className="w-16 text-right font-mono">${item.value.toLocaleString()}</div>
+                        </div>
+                    ))}
+                    {data.length === 0 && <div className="text-center text-gray-500 py-10">Sin gastos registrados</div>}
+                </div>
+            );
+        };
+
+        const TrendLineChart = ({ transactions, totalBudget, daysInMonth }) => {
+            const dailyData = Array(daysInMonth).fill(0);
+            transactions.forEach(t => {
+                const day = parseInt(t.date.split('-')[2]) - 1;
+                if (day >= 0 && day < daysInMonth) dailyData[day] += t.amount;
+            });
+            let accumulator = 0;
+            const cumulativeData = dailyData.map((amount, idx) => {
+                const today = new Date().getDate();
+                if (idx + 1 > today) return null; 
+                accumulator += amount;
+                return accumulator;
+            }).filter(val => val !== null);
+            if (cumulativeData.length === 0) return <div className="h-full flex items-center justify-center text-gray-500 text-xs">Registra gastos para ver la tendencia</div>;
+            const maxVal = Math.max(totalBudget, ...cumulativeData) * 1.1; 
+            const width = 1000; const height = 300; 
+            const points = cumulativeData.map((val, idx) => {
+                const x = (idx / (daysInMonth - 1)) * width;
+                const y = height - ((val / maxVal) * height);
+                return `${x},${y}`;
+            }).join(' ');
+            const budgetY = height - ((totalBudget / maxVal) * height);
+            
+            return (
+                <div className="relative w-full h-full p-2">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.2"/>
+                                <stop offset="100%" stopColor="#ef4444" stopOpacity="0"/>
+                            </linearGradient>
+                        </defs>
+                        <path d={`M 0 ${height} L ${points.split(' ')[0]} ${points.replaceAll(' ',', ')} L ${points.split(' ').slice(-1)[0].split(',')[0]} ${height} Z`} fill="url(#trendGradient)" stroke="none" />
+                        <line x1="0" y1={height} x2={width} y2={height} stroke="#334155" strokeWidth="2" />
+                        <line x1="0" y1={0} x2={width} y2={0} stroke="#334155" strokeWidth="2" />
+                        <line x1="0" y1={budgetY} x2={width} y2={budgetY} stroke="#64748b" strokeWidth="2" strokeDasharray="5,5" />
+                        <text x="10" y={budgetY - 10} fontSize="20" fill="#64748b" fontWeight="bold">Límite: ${totalBudget.toLocaleString()}</text>
+                        <polyline points={points} fill="none" stroke="#ef4444" strokeWidth="4" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+                        {cumulativeData.map((val, idx) => {
+                             const x = (idx / (daysInMonth - 1)) * width;
+                             const y = height - ((val / maxVal) * height);
+                             return (<circle key={idx} cx={x} cy={y} r="4" fill="#ef4444" />)
+                        })}
+                    </svg>
+                </div>
+            );
+        };
+
+        const ProjectionChart = ({ years, currentNetWorth, annualReturn, monthlySavings, targetCapital, targetYears }) => {
+            const chartPoints = [];
+            let projectedNW = currentNetWorth;
+            const displayYears = Math.max(years, targetYears + 2); 
+            
+            for (let i = 0; i <= displayYears; i++) {
+                chartPoints.push({ year: i, value: projectedNW });
+                projectedNW = (projectedNW * (1 + annualReturn)) + (monthlySavings * 12);
+            }
+
+            const maxVal = Math.max(targetCapital * 1.2, projectedNW);
+            const width = 1000; const height = 400; 
+            const points = chartPoints.map((p, idx) => {
+                const x = (idx / displayYears) * width;
+                const y = height - ((p.value / maxVal) * height);
+                return `${x},${y}`;
+            }).join(' ');
+            const targetX = (targetYears / displayYears) * width;
+            const targetY = height - ((targetCapital / maxVal) * height);
+
+            return (
+                <div className="relative w-full h-64 p-4 bg-slate-900 rounded border border-slate-700 mt-4">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="growthGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#22c55e" stopOpacity="0.4"/>
+                                <stop offset="100%" stopColor="#22c55e" stopOpacity="0"/>
+                            </linearGradient>
+                        </defs>
+                        <line x1="0" y1={height} x2={width} y2={height} stroke="#475569" strokeWidth="2" />
+                        <line x1="0" y1={0} x2={width} y2={0} stroke="#475569" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
+                        <polygon points={`0,${height} ${points} ${width},${height}`} fill="url(#growthGradient)" />
+                        <polyline points={points} fill="none" stroke="#22c55e" strokeWidth="4" strokeLinejoin="round" />
+                        <circle cx={targetX} cy={targetY} r="8" fill="#eab308" stroke="white" strokeWidth="2" />
+                        <line x1={targetX} y1={targetY} x2={targetX} y2={height} stroke="#eab308" strokeWidth="2" strokeDasharray="5,5" />
+                        <text x={targetX + 10} y={targetY - 10} fontSize="24" fill="#eab308" fontWeight="bold">META: ${targetCapital.toLocaleString()}</text>
+                    </svg>
+                    <div className="absolute bottom-0 left-0 text-xs text-gray-500">Hoy</div>
+                    <div className="absolute bottom-0 right-0 text-xs text-gray-500">+{displayYears} Años</div>
+                </div>
+            );
+        };
+        
+        // --- GRÁFICA MENSUAL (BAR CHART) ---
+        const MonthlyComparisonChart = ({ monthlyData }) => {
+             const maxIncome = Math.max(...monthlyData.map(d => d.income));
+             const maxExpense = Math.max(...monthlyData.map(d => d.expense));
+             const maxVal = Math.max(maxIncome, maxExpense, 10000) * 1.15; 
+             const height = 400; const width = 1200; 
+             const paddingX = 60; const paddingY = 40;
+             const chartW = width - (paddingX * 2); const chartH = height - (paddingY * 2);
+             const barWidth = (chartW / 12) * 0.35; const groupWidth = chartW / 12;
+             
+             return (
+                <div className="w-full overflow-x-auto bg-slate-900 rounded-lg p-2 border border-slate-700">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible min-w-[800px]" preserveAspectRatio="xMidYMid meet">
+                         {/* Grid Lines */}
+                         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+                             const y = paddingY + chartH - (chartH * tick);
+                             return (<g key={tick}><line x1={paddingX} y1={y} x2={width - paddingX} y2={y} stroke="#334155" strokeWidth="1" strokeDasharray={tick === 0 ? "" : "4,4"} /><text x={paddingX - 10} y={y + 5} fill="#64748b" fontSize="14" textAnchor="end">${Math.round(maxVal * tick / 1000)}k</text></g>);
+                         })}
+                        {monthlyData.map((d, i) => {
+                            const xCenter = paddingX + (i * groupWidth) + (groupWidth / 2);
+                            const hIncome = (d.income / maxVal) * chartH;
+                            const hExpense = (d.expense / maxVal) * chartH;
+                            const xIncome = xCenter - barWidth - 2;
+                            const xExpense = xCenter + 2;
+                            const yBase = paddingY + chartH;
+                            return (
+                                <g key={i} className="chart-group cursor-pointer">
+                                    <rect x={paddingX + (i * groupWidth)} y={paddingY} width={groupWidth} height={chartH} fill="transparent" />
+                                    <rect x={xIncome} y={yBase - hIncome} width={barWidth} height={hIncome} fill="#22c55e" rx="4" className="chart-bar transition-opacity duration-200" />
+                                    <rect x={xExpense} y={yBase - hExpense} width={barWidth} height={hExpense} fill="#ef4444" rx="4" className="chart-bar transition-opacity duration-200" />
+                                    {hIncome > 20 && <text x={xIncome + barWidth/2} y={yBase - hIncome - 5} fill="#4ade80" fontSize="12" textAnchor="middle" fontWeight="bold">${Math.round(d.income/1000)}k</text>}
+                                    {hExpense > 20 && <text x={xExpense + barWidth/2} y={yBase - hExpense - 5} fill="#f87171" fontSize="12" textAnchor="middle" fontWeight="bold">${Math.round(d.expense/1000)}k</text>}
+                                    <text x={xCenter} y={height - 10} fill="#cbd5e1" fontSize="14" textAnchor="middle" fontWeight="bold">{d.month}</text>
+                                </g>
+                            );
+                        })}
+                    </svg>
+                    <div className="flex justify-center gap-6 mt-2 text-sm">
+                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded"></div> <span className="text-gray-300">Ingresos</span></div>
+                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded"></div> <span className="text-gray-300">Gastos</span></div>
+                    </div>
+                </div>
+             );
+        };
+
+        // --- UTILS ---
+        const fireConfetti = () => {
+            const colors = ['#ef4444', '#22c55e', '#3b82f6', '#eab308'];
+            for (let i = 0; i < 100; i++) {
+                const el = document.createElement('div');
+                el.classList.add('confetti');
+                el.style.left = Math.random() * 100 + 'vw';
+                el.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                el.style.animationDuration = (Math.random() * 2 + 2) + 's';
+                document.body.appendChild(el);
+                setTimeout(() => el.remove(), 4000);
+            }
+        };
+
+        const formatMonth = (dateString) => {
+            const date = new Date(dateString);
+            return new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date).toUpperCase();
+        };
+
+        // --- 4. APP PRINCIPAL ---
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [data, setData] = useState(null); 
+            const [loading, setLoading] = useState(true);
+            const [loadingTooLong, setLoadingTooLong] = useState(false); 
+            const [syncStatus, setSyncStatus] = useState('disconnected');
+            const [cloudId, setCloudId] = useState(localStorage.getItem('lobo_cloud_id') || "");
+            const [view, setView] = useState('simulator'); 
+            const [currentDate, setCurrentDate] = useState(new Date());
+            const [editingItem, setEditingItem] = useState(null); 
+            const [editingTx, setEditingTx] = useState(null); 
+            const [paymentItem, setPaymentItem] = useState(null);
+            const [configModalOpen, setConfigModalOpen] = useState(false);
+            const [targetDateModalOpen, setTargetDateModalOpen] = useState(false); 
+            const [syncModalOpen, setSyncModalOpen] = useState(false);
+
+            // --- LOADING WATCHDOG ---
+            useEffect(() => {
+                if (loading) {
+                    const timer = setTimeout(() => setLoadingTooLong(true), 5000); // 5 sec timeout
+                    return () => clearTimeout(timer);
+                } else {
+                    setLoadingTooLong(false);
+                }
+            }, [loading]);
+
+            // --- SYNC LOGIC ---
+            // Helper para obtener la referencia correcta del documento
+            const getDocRef = (u, cId) => {
+                if (cId && cId.trim() !== "") {
+                    // Si hay Cloud ID, usamos la carpeta PUBLICA compartida
+                    return doc(db, 'artifacts', appId, 'public', 'data', cId.trim());
+                } else {
+                    // Si NO hay Cloud ID, usamos la carpeta PRIVADA del usuario anónimo
+                    return doc(db, 'artifacts', appId, 'users', u.uid, 'data', 'main_doc');
+                }
+            };
+
+            useEffect(() => {
+                const initAuth = async () => {
+                    try { 
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth); 
+                        }
+                    } catch (error) { console.error("Auth:", error); setSyncStatus('error'); }
+                };
+                initAuth();
+                
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    if (u) {
+                        setUser(u);
+                        const docRef = getDocRef(u, cloudId);
+                        
+                        // SNAPSHOT WITH ERROR HANDLING
+                        const unsubDoc = onSnapshot(docRef, 
+                            (snap) => {
+                                if (snap.exists()) { setData(snap.data()); setSyncStatus('saved'); } 
+                                else { 
+                                    if (!data) { setDoc(docRef, INITIAL_DATA); setData(INITIAL_DATA); }
+                                }
+                                setLoading(false);
+                            },
+                            (error) => {
+                                console.error("Firestore Error:", error);
+                                setSyncStatus('error');
+                                setData(INITIAL_DATA); 
+                                // alert("Error de conexión. Verifica tu internet."); // Menos intrusivo
+                                setLoading(false);
+                            }
+                        );
+                        return () => unsubDoc();
+                    }
+                });
+                return () => unsubscribe();
+            }, [cloudId]); 
+
+            const saveData = async (newData) => {
+                setData(newData); setSyncStatus('syncing');
+                if (user) { 
+                    try { 
+                        const docRef = getDocRef(user, cloudId);
+                        await setDoc(docRef, newData); 
+                        setSyncStatus('saved'); 
+                    } catch (e) { setSyncStatus('error'); console.error("Save Error", e); } 
+                }
+            };
+            
+            // --- SYNC HANDLER ---
+            const handleSync = async (newId) => {
+                if (!newId) return;
+                const formattedId = newId.trim();
+                localStorage.setItem('lobo_cloud_id', formattedId);
+                setCloudId(formattedId);
+                
+                if (data) {
+                    try {
+                        // Intentamos migrar los datos actuales a la nueva nube pública
+                        const targetRef = doc(db, 'artifacts', appId, 'public', 'data', formattedId);
+                        const snap = await getDoc(targetRef);
+                        
+                        // Si la nube está vacía, subimos lo que tenemos. Si no, descargamos (el useEffect lo hará).
+                        if (!snap.exists()) {
+                             await setDoc(targetRef, data);
+                             alert("✅ Datos subidos a la Nube Pública. Ahora usa esta misma clave en tu otro dispositivo.");
+                        } else {
+                             alert("✅ Conectado a Nube existente. Los datos se descargarán.");
+                        }
+                    } catch(e) {
+                        alert("Error al conectar: Posiblemente permisos de red.");
+                        console.error(e);
+                    }
+                }
+                setSyncModalOpen(false);
+                // No recargamos forzosamente, dejamos que el useEffect haga el switch
+            };
+
+            const forceStart = () => {
+                setData(INITIAL_DATA);
+                setLoading(false);
+                setSyncStatus('disconnected');
+            };
+
+            // --- PANTALLA DE CARGA ---
+            if (loading && !data) return (
+                <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-6 text-white p-4 text-center">
+                    <div className="loader"></div>
+                    <p className="text-xl animate-pulse">Conectando con la Manada...</p>
+                    {loadingTooLong && (
+                        <div className="bg-red-900/50 border border-red-500 p-4 rounded-lg max-w-sm animate-fade-in">
+                            <p className="text-sm mb-3">⚠️ La conexión está tardando mucho. Puede ser un problema de red o de clave.</p>
+                            <button onClick={forceStart} className="btn bg-red-600 hover:bg-red-500 text-white w-full">Forzar Inicio (Modo Local)</button>
+                        </div>
+                    )}
+                </div>
+            );
+
+            // --- CÁLCULOS GENERALES (SAFE CHECK) ---
+            const safeData = data || INITIAL_DATA;
+            const totalAssets = (safeData.assets || []).reduce((sum, i) => sum + Number(i.value), 0);
+            const totalDebts = (safeData.debts || []).reduce((sum, i) => sum + Number(i.value), 0);
+            const netWorth = totalAssets - totalDebts;
+            const getMonthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            const activeMonthKey = getMonthKey(currentDate);
+            const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+            const daysInCurrentMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
+            const monthlyTransactions = (safeData.transactions || []).filter(t => t.date.startsWith(activeMonthKey));
+            const monthlyIncomes = (safeData.incomes || []).filter(i => i.date.startsWith(activeMonthKey));
+            const totalMonthlyIncome = monthlyIncomes.reduce((acc, i) => acc + i.amount, 0);
+            const totalMonthlyExpenses = monthlyTransactions.reduce((acc, t) => acc + t.amount, 0);
+
+            // --- ACCIONES ---
+            const addAsset = (name, value, type) => { saveData({ ...data, assets: [...data.assets, { id: Date.now(), name, value: Number(value), type }] }); };
+            const updateItem = (type, id, val, rate, name) => { if (type === 'asset') saveData({...data, assets: data.assets.map(a => a.id === id ? { ...a, value: Number(val), name: name } : a)}); else saveData({...data, debts: data.debts.map(d => d.id === id ? { ...d, value: Number(val), rate: Number(rate), name: name } : d)}); setEditingItem(null); };
+            const handlePayment = (amount) => { if (!paymentItem) return; const val = Number(amount); if (!val) return; if (paymentItem.type === 'asset') saveData({ ...data, assets: data.assets.map(a => a.id === paymentItem.item.id ? { ...a, value: a.value + val } : a) }); else saveData({ ...data, debts: data.debts.map(d => d.id === paymentItem.item.id ? { ...d, value: d.value - val } : d) }); setPaymentItem(null); fireConfetti(); };
+            const addTransaction = (tx, date) => { saveData({ ...data, transactions: [...data.transactions, { ...tx, id: Date.now(), date }] }); };
+            const addIncome = (inc, date) => { saveData({ ...data, incomes: [...data.incomes, { ...inc, id: Date.now(), date }] }); };
+            const deleteHistoryItem = (type, id) => { if(!confirm("¿Borrar?")) return; if(type === 'income') saveData({ ...data, incomes: data.incomes.filter(i => i.id !== id) }); else saveData({ ...data, transactions: data.transactions.filter(t => t.id !== id) }); };
+            const saveTransactionChanges = (id, type, newAmount, newComment, newCategory, newSection, newDate) => { if(type === 'income') saveData({ ...data, incomes: data.incomes.map(i => i.id === id ? { ...i, amount: Number(newAmount), comment: newComment, source: newCategory, date: newDate } : i) }); else saveData({ ...data, transactions: data.transactions.map(t => t.id === id ? { ...t, amount: Number(newAmount), comment: newComment, category: newCategory, section: newSection, date: newDate } : t) }); setEditingTx(null); };
+            const updateBudgetSectionLimit = (section, newLimit) => { saveData({ ...data, budgetConfig: { ...data.budgetConfig, [section]: { ...data.budgetConfig[section], limit: Number(newLimit) } } }); };
+            const updateBudgetCategoryLimit = (section, category, newLimit) => { saveData({ ...data, budgetConfig: { ...data.budgetConfig, [section]: { ...data.budgetConfig[section], categories: { ...data.budgetConfig[section].categories, [category]: Number(newLimit) } } } }); };
+            const addBudgetCategory = (section, categoryName, limit) => { if(!categoryName) return; saveData({ ...data, budgetConfig: { ...data.budgetConfig, [section]: { ...data.budgetConfig[section], categories: { ...data.budgetConfig[section].categories, [categoryName.toUpperCase()]: Number(limit) } } } }); };
+            const deleteBudgetCategory = (section, categoryName) => { if(!confirm(`¿Borrar ${categoryName}?`)) return; const newCategories = { ...data.budgetConfig[section].categories }; delete newCategories[categoryName]; saveData({ ...data, budgetConfig: { ...data.budgetConfig, [section]: { ...data.budgetConfig[section], categories: newCategories } } }); };
+            const addBudgetSection = (sectionName) => { if(!sectionName) return; saveData({ ...data, budgetConfig: { ...data.budgetConfig, [sectionName.toUpperCase()]: { limit: 0, categories: {} } } }); };
+            const deleteBudgetSection = (sectionName) => { if(!confirm(`¿Borrar ${sectionName}?`)) return; const newConfig = { ...data.budgetConfig }; delete newConfig[sectionName]; saveData({ ...data, budgetConfig: newConfig }); };
+            const updateTargetDate = (newDate) => { saveData({ ...data, targetDate: newDate }); setTargetDateModalOpen(false); };
+
+            // --- VISTAS ---
+            const SimulatorView = () => {
+                const [annualReturn, setAnnualReturn] = useState(8); const [inflation, setInflation] = useState(4); const [monthlySavings, setMonthlySavings] = useState(7200); 
+                const [manualTargetYears, setManualTargetYears] = useState(15); const [manualTargetCapital, setManualTargetCapital] = useState(7500000); 
+                const realReturn = (annualReturn - inflation) / 100; const annualSavings = monthlySavings * 12;
+                let projectedAtTarget = netWorth; for(let i=0; i<manualTargetYears; i++) { projectedAtTarget = (projectedAtTarget * (1 + realReturn)) + annualSavings; }
+                const gap = projectedAtTarget - manualTargetCapital; const isGoalMet = gap >= 0;
+                return (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="panel bg-indigo-900/20 border-indigo-500 text-center mb-6"><h2 className="text-2xl font-bold text-indigo-400 mb-1">🔮 BOLA DE CRISTAL</h2><p className="text-sm text-gray-400">Define tus propias reglas.</p></div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="panel"><h3 className="font-bold mb-4 text-gray-300">1. El Mercado</h3><div className="mb-4"><div className="flex justify-between text-sm mb-1"><span>Retorno Anual</span><span className="text-green-400 font-bold">{annualReturn}%</span></div><input type="range" min="1" max="15" step="0.5" value={annualReturn} onChange={e=>setAnnualReturn(Number(e.target.value))} className="w-full" /></div><div><div className="flex justify-between text-sm mb-1"><span>Inflación</span><span className="text-red-400 font-bold">{inflation}%</span></div><input type="range" min="1" max="10" step="0.5" value={inflation} onChange={e=>setInflation(Number(e.target.value))} className="w-full" /><div className="text-right text-xs text-gray-500 mt-1">Real: {(annualReturn - inflation).toFixed(1)}%</div></div></div>
+                            <div className="panel"><h3 className="font-bold mb-4 text-gray-300">2. Tu Esfuerzo</h3><div className="mb-4"><label className="block text-xs text-gray-500 mb-1">Ahorro Mensual</label><input type="number" value={monthlySavings} onChange={e=>setMonthlySavings(Number(e.target.value))} className="input-dark font-mono text-lg" /></div></div>
+                            <div className="panel border-l-4 border-yellow-500"><h3 className="font-bold mb-4 text-yellow-400">3. Tus Objetivos</h3><div className="mb-4"><label className="block text-xs text-gray-500 mb-1">¿Años para retiro?</label><input type="number" value={manualTargetYears} onChange={e=>setManualTargetYears(Number(e.target.value))} className="input-dark font-mono text-lg text-yellow-300" /></div><div><label className="block text-xs text-gray-500 mb-1">¿Capital Meta?</label><input type="number" value={manualTargetCapital} onChange={e=>setManualTargetCapital(Number(e.target.value))} className="input-dark font-mono text-lg text-yellow-300" /></div></div>
+                        </div>
+                        <div className="panel text-center"><h3 className="font-bold mb-4 text-gray-300 border-b border-gray-700 pb-2">VEREDICTO</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center"><div><div className="text-xs text-gray-400 uppercase font-bold mb-1">En {manualTargetYears} años tendrás:</div><div className="text-4xl font-bold text-white mb-4">${projectedAtTarget.toLocaleString(undefined, {maximumFractionDigits: 0})}</div></div><div className={`p-4 rounded-lg border ${isGoalMet ? 'bg-green-900/30 border-green-500' : 'bg-red-900/30 border-red-500'}`}><div className="text-lg font-bold mb-2">{isGoalMet ? '✅ LO LOGRAS' : '⚠️ TE QUEDAS CORTO'}</div><div className="text-sm text-gray-300 mb-2">{isGoalMet ? `Te sobran $${gap.toLocaleString()}` : `Te faltan $${Math.abs(gap).toLocaleString()}`}</div></div></div></div>
+                        <div className="panel"><h3 className="font-bold mb-4 text-gray-300">Trayectoria vs Meta</h3><ProjectionChart years={manualTargetYears + 5} currentNetWorth={netWorth} annualReturn={realReturn} monthlySavings={monthlySavings} targetCapital={manualTargetCapital} targetYears={manualTargetYears}/></div>
+                    </div>
+                );
+            };
+
+            const GlobalView = () => { 
+                const [newName, setNewName] = useState(""); const [newValue, setNewValue] = useState(""); const [newType, setNewType] = useState("investment");
+                return (
+                    <div className="space-y-8 animate-fade-in">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="panel border-l-4 border-blue-500"><div className="text-sm text-blue-300 font-bold tracking-widest">PATRIMONIO NETO</div><div className="text-4xl font-bold text-white mt-2">${netWorth.toLocaleString()}</div></div>
+                            <div className="panel border-l-4 border-green-500"><div className="text-sm text-green-300 font-bold tracking-widest">ACTIVOS</div><div className="text-4xl font-bold text-white mt-2">${totalAssets.toLocaleString()}</div></div>
+                            <div className="panel border-l-4 border-red-500"><div className="text-sm text-red-300 font-bold tracking-widest">DEUDAS</div><div className="text-4xl font-bold text-white mt-2">${totalDebts.toLocaleString()}</div></div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-gray-700 pb-2"><h3 className="text-xl font-bold text-green-400">🏰 Tus Activos</h3></div>{safeData.assets.map(asset => (<div key={asset.id} className="flex justify-between items-center p-3 bg-slate-800 rounded-lg border border-slate-700"><div onClick={() => setEditingItem({...asset, itemType: 'asset'})} className="cursor-pointer flex-1"><div className="font-bold text-slate-200">{asset.name}</div><div className="text-xs text-gray-500 uppercase">{asset.type === 'real_estate' ? '🏠 Inmueble' : '💰 Financiero'}</div></div><div className="flex items-center gap-3"><div className="text-xl font-mono font-bold text-green-400">${asset.value.toLocaleString()}</div>{asset.type !== 'real_estate' && (<button onClick={() => setPaymentItem({ item: asset, type: 'asset' })} className="w-8 h-8 rounded-full bg-green-900 text-green-400 hover:bg-green-700 flex items-center justify-center font-bold text-lg">+</button>)}</div></div>))}<div className="panel bg-slate-800/50 border-dashed border-gray-600 mt-4"><div className="text-xs font-bold text-gray-400 mb-2">AGREGAR NUEVO ACTIVO</div><div className="flex gap-2 mb-2"><input placeholder="Nombre" value={newName} onChange={e=>setNewName(e.target.value)} className="input-dark w-1/3" /><input type="number" placeholder="$ Valor" value={newValue} onChange={e=>setNewValue(e.target.value)} className="input-dark w-1/3" /><select value={newType} onChange={e=>setNewType(e.target.value)} className="input-dark w-1/3"><option value="investment">Inversión</option><option value="real_estate">Inmueble</option><option value="cash">Efectivo</option></select></div><button onClick={() => {if(newName && newValue) { addAsset(newName, newValue, newType); setNewName(""); setNewValue(""); }}} className="btn btn-primary w-full text-xs">Guardar Nuevo</button></div></div>
+                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-gray-700 pb-2"><h3 className="text-xl font-bold text-red-400">⚔️ Tus Deudas</h3></div>{safeData.debts.map(debt => (<div key={debt.id} className={`flex justify-between items-center p-3 bg-slate-800 rounded-lg border-l-4 ${debt.type === 'toxic' ? 'border-red-500' : 'border-green-500'}`}><div onClick={() => setEditingItem({...debt, itemType: 'debt'})} className="cursor-pointer flex-1"><div className="font-bold text-slate-200">{debt.name}</div><div className="text-xs text-gray-500">Tasa: {debt.rate}% Anual</div></div><div className="flex items-center gap-3"><div className="text-xl font-mono font-bold text-red-400">${debt.value.toLocaleString()}</div><button onClick={() => setPaymentItem({ item: debt, type: 'debt' })} className="w-8 h-8 rounded-full bg-red-900 text-red-400 hover:bg-red-700 flex items-center justify-center font-bold">↓</button></div></div>))}</div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const MonthlyView = () => {
+                const spentBySection = {}; const spentByCategory = {};
+                Object.keys(safeData.budgetConfig).forEach(sec => spentBySection[sec] = 0);
+                monthlyTransactions.forEach(t => { spentBySection[t.section] = (spentBySection[t.section] || 0) + t.amount; spentByCategory[t.category] = (spentByCategory[t.category] || 0) + t.amount; });
+                const pieData = Object.keys(safeData.budgetConfig).map((sec, idx) => ({ name: sec, value: spentBySection[sec] || 0, fill: ['#3b82f6', '#eab308', '#22c55e', '#a855f7', '#ec4899'][idx % 5] }));
+                const barData = Object.entries(spentByCategory).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+                const totalMonthlyBudget = Object.values(safeData.budgetConfig).reduce((acc, curr) => acc + curr.limit, 0);
+                const today = new Date().toISOString().split('T')[0];
+                const [mode, setMode] = useState('expense'); const [amount, setAmount] = useState(""); const [section, setSection] = useState(Object.keys(safeData.budgetConfig)[0]); const [category, setCategory] = useState(Object.keys(safeData.budgetConfig[section]?.categories || {})[0] || ""); const [comment, setComment] = useState(""); const [source, setSource] = useState("SALARIO"); const [date, setDate] = useState(today); 
+                const handleSectionChange = (e) => { const newSec = e.target.value; setSection(newSec); const firstCat = Object.keys(safeData.budgetConfig[newSec]?.categories || {})[0]; setCategory(firstCat || ""); };
+                const submit = (e) => { e.preventDefault(); if (!amount || !date) return; if (mode === 'expense') addTransaction({ section, category, amount: Number(amount), comment }, date); else addIncome({ source, amount: Number(amount), comment }, date); setAmount(""); setComment(""); };
+                const allHistory = [...monthlyIncomes.map(i => ({ ...i, type: 'income', displayCategory: i.source, isPositive: true })), ...monthlyTransactions.map(t => ({ ...t, type: 'expense', displayCategory: t.category, isPositive: false }))].sort((a, b) => b.id - a.id);
+                const exportToExcel = () => { const wsData = [["Fecha", "Tipo", "Categoría/Fuente", "Comentario", "Monto"], ...allHistory.map(item => [item.date, item.isPositive ? "INGRESO" : "GASTO", item.displayCategory, item.comment, item.amount])]; const ws = XLSX.utils.aoa_to_sheet(wsData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Movimientos"); XLSX.writeFile(wb, `Lobo_Respaldo_${activeMonthKey}.xlsx`); };
+
+                return (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <button onClick={() => { const d = new Date(currentDate); d.setMonth(d.getMonth()-1); setCurrentDate(d); }} className="btn btn-ghost"><i className="ri-arrow-left-s-line"></i></button>
+                            <div className="text-center"><div className="text-xs text-blue-400 font-bold tracking-widest">GESTIÓN MENSUAL</div><div className="text-2xl font-bold text-white">{formatMonth(`${activeMonthKey}-01`)}</div></div>
+                            <div className="flex items-center gap-2"><button onClick={exportToExcel} className="btn bg-green-700 hover:bg-green-600 text-white text-xs md:text-sm" title="Descargar Excel"><i className="ri-file-excel-2-line"></i></button><button onClick={() => setConfigModalOpen(true)} className="btn bg-slate-700 hover:bg-slate-600 text-white text-xs md:text-sm"><i className="ri-settings-4-line"></i></button><button onClick={() => { const d = new Date(currentDate); d.setMonth(d.getMonth()+1); setCurrentDate(d); }} className="btn btn-ghost"><i className="ri-arrow-right-s-line"></i></button></div>
+                        </div>
+                        <div className="panel overflow-hidden border border-slate-600"><h3 className="font-bold mb-4 text-lg flex items-center gap-2 text-yellow-400"><i className="ri-history-line"></i> Bitácora</h3><div className="overflow-x-auto max-h-80"><table className="w-full text-sm text-left border-collapse"><thead className="text-gray-400 bg-slate-800 text-xs uppercase sticky top-0"><tr><th className="p-3">Fecha</th><th className="p-3">Tipo</th><th className="p-3">Concepto</th><th className="p-3">Comentario</th><th className="p-3 text-right">Monto</th><th className="p-3 text-center"></th></tr></thead><tbody className="divide-y divide-slate-700">{allHistory.map((item) => (<tr key={item.id} className="hover:bg-slate-800/50 group"><td className="p-3 whitespace-nowrap text-gray-400">{item.date}</td><td className="p-3"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${item.isPositive ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{item.isPositive ? 'Ingreso' : 'Gasto'}</span></td><td className="p-3 font-bold text-slate-200">{item.displayCategory}</td><td className="p-3 text-gray-500 italic">{item.comment || '-'}</td><td className={`p-3 text-right font-mono font-bold ${item.isPositive ? 'text-green-400' : 'text-red-400'}`}>{item.isPositive ? '+' : '-'}${item.amount.toLocaleString()}</td><td className="p-3 text-center flex justify-center gap-2"><button onClick={() => setEditingTx(item)} className="p-1 text-blue-400 hover:text-blue-300 transition"><i className="ri-pencil-line text-lg"></i></button><button onClick={() => deleteHistoryItem(item.type, item.id)} className="p-1 text-red-500 hover:text-red-400 transition"><i className="ri-delete-bin-line text-lg"></i></button></td></tr>))}{allHistory.length === 0 && (<tr><td colSpan="6" className="p-8 text-center text-gray-500">No hay movimientos.</td></tr>)}</tbody></table></div></div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><div className="panel h-80"><h4 className="text-center text-xs font-bold text-gray-400 mb-2">DISTRIBUCIÓN</h4><SimplePieChart data={pieData} /></div><div className="panel h-80"><h4 className="text-center text-xs font-bold text-gray-400 mb-2">POR CATEGORÍA</h4><SimpleBarChart data={barData} /></div></div>
+                        <div className="panel border-t-4 border-yellow-500">
+                            <div className="flex gap-4 mb-4 bg-slate-900 p-1 rounded-lg"><button onClick={()=>setMode('expense')} className={`flex-1 py-2 rounded font-bold text-sm transition ${mode==='expense'?'bg-red-600 text-white':'text-gray-400'}`}>Gasto</button><button onClick={()=>setMode('income')} className={`flex-1 py-2 rounded font-bold text-sm transition ${mode==='income'?'bg-green-600 text-white':'text-gray-400'}`}>Ingreso</button></div>
+                            <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end"> 
+                                <div><label className="text-[10px] text-gray-500">Fecha</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="input-dark" required /></div>
+                                {mode === 'expense' ? (<><div><label className="text-[10px] text-gray-500">Sección</label><select value={section} onChange={handleSectionChange} className="input-dark">{Object.keys(safeData.budgetConfig).map(s => <option key={s} value={s}>{s}</option>)}</select></div><div><label className="text-[10px] text-gray-500">Categoría</label><select value={category} onChange={e => setCategory(e.target.value)} className="input-dark">{safeData.budgetConfig[section] && Object.keys(safeData.budgetConfig[section].categories).map(c => <option key={c} value={c}>{c}</option>)}</select></div></>) : (<div className="md:col-span-2"><label className="text-[10px] text-gray-500">Fuente</label><select value={source} onChange={e => setSource(e.target.value)} className="input-dark"><option value="SALARIO">Salario Nómina</option><option value="VALES">Vales de Despensa</option><option value="AGUINALDO">Aguinaldo</option><option value="FONDO AHORRO">Fondo de Ahorro</option><option value="EXTRA">Ingreso Extra / Venta</option></select></div>)}
+                                <div><label className="text-[10px] text-gray-500">Monto</label><input type="number" value={amount} onChange={e=>setAmount(e.target.value)} className="input-dark" placeholder="$0.00" /></div><button className="btn btn-primary h-[38px] w-full"><i className="ri-save-3-line"></i></button>
+                                <div className="md:col-span-5"><label className="text-[10px] text-gray-500">Comentario</label><input type="text" value={comment} onChange={e=>setComment(e.target.value)} className="input-dark" placeholder="Detalle..." /></div>
+                            </form>
+                        </div>
+                        <div className="panel h-64 border-t-4 border-orange-500"><h4 className="text-center text-xs font-bold text-gray-400 mb-2 uppercase flex items-center justify-center gap-2">🔥 Burn Rate</h4><TrendLineChart transactions={monthlyTransactions} totalBudget={totalMonthlyBudget} daysInMonth={daysInCurrentMonth} /></div>
+                    </div>
+                );
+            };
+
+            const SummaryView = () => {
+                const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+                const currentYearStr = selectedYear.toString();
+                
+                // --- 1. PREPARAR DATOS MENSUALES PARA EL AÑO SELECCIONADO ---
+                const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+                const monthlyData = Array(12).fill(null).map((_, i) => ({ monthIndex: i, month: monthNames[i], income: 0, expense: 0 }));
+
+                (safeData.incomes || []).forEach(inc => {
+                    if (inc.date.startsWith(currentYearStr)) {
+                        const m = parseInt(inc.date.split('-')[1]) - 1;
+                        if(m >=0 && m < 12) monthlyData[m].income += inc.amount;
+                    }
+                });
+                (safeData.transactions || []).forEach(tx => {
+                    if (tx.date.startsWith(currentYearStr)) {
+                        const m = parseInt(tx.date.split('-')[1]) - 1;
+                        if(m >=0 && m < 12) monthlyData[m].expense += tx.amount;
+                    }
+                });
+
+                // --- 2. CÁLCULO DE PROMEDIOS (TABLA PROMEDIO_ANUAL) ---
+                const activeMonths = new Set();
+                (safeData.transactions || []).forEach(t => { if(t.date.startsWith(currentYearStr)) activeMonths.add(t.date.substring(0,7)); });
+                const monthsCount = Math.max(activeMonths.size, 1); 
+
+                const categoryAverages = {};
+                const sectionAverages = {};
+
+                // Inicializar promedios con la config
+                Object.entries(safeData.budgetConfig).forEach(([sec, conf]) => {
+                    sectionAverages[sec] = { total: 0, budget: conf.limit };
+                    Object.entries(conf.categories).forEach(([cat, lim]) => {
+                        categoryAverages[cat] = { total: 0, budget: lim, section: sec };
+                    });
+                });
+
+                // Sumar gastos del año seleccionado
+                (safeData.transactions || []).filter(t => t.date.startsWith(currentYearStr)).forEach(t => {
+                    if (sectionAverages[t.section]) sectionAverages[t.section].total += t.amount;
+                    if (categoryAverages[t.category]) categoryAverages[t.category].total += t.amount;
+                });
+
+                // --- 3. DATOS MENSUALES POR SECCIÓN Y CATEGORÍA (TABLAS DETALLADAS) ---
+                const sectionMonthly = {};
+                const categoryMonthly = {};
+
+                // Inicializar estructuras
+                Object.keys(safeData.budgetConfig).forEach(sec => {
+                    sectionMonthly[sec] = Array(12).fill(0);
+                    Object.keys(safeData.budgetConfig[sec].categories).forEach(cat => {
+                        categoryMonthly[cat] = Array(12).fill(0);
+                    });
+                });
+
+                // Llenar datos mensuales
+                (safeData.transactions || []).filter(t => t.date.startsWith(currentYearStr)).forEach(t => {
+                    const mIndex = parseInt(t.date.split('-')[1]) - 1;
+                    if (sectionMonthly[t.section]) sectionMonthly[t.section][mIndex] += t.amount;
+                    if (categoryMonthly[t.category]) categoryMonthly[t.category][mIndex] += t.amount;
+                });
+
+                const targetDate = new Date(safeData.targetDate); const now = new Date(); const daysRemaining = Math.max(0, Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24))); const summersRemaining = Math.max(0, Math.floor(daysRemaining / 365));
+                
+                const exportAnnualReport = () => { 
+                    const wsData = [ ["MES", "INGRESOS", "GASTOS"], ...monthlyData.map(d => [d.month, d.income, d.expense]) ]; 
+                    const ws = XLSX.utils.aoa_to_sheet(wsData); 
+                    const wb = XLSX.utils.book_new(); 
+                    XLSX.utils.book_append_sheet(wb, ws, `Estrategia_${selectedYear}`); 
+                    XLSX.writeFile(wb, `PlanLobo_Estrategia_${selectedYear}.xlsx`); 
+                };
+
+                return (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 mb-6">
+                            <button onClick={() => setSelectedYear(y => y - 1)} className="btn btn-ghost"><i className="ri-arrow-left-s-line text-xl"></i></button>
+                            <div className="text-center w-full"><div className="text-xs text-yellow-400 font-bold tracking-widest uppercase">Estrategia Anual</div><div className="text-2xl font-bold text-white uppercase">{selectedYear}</div></div>
+                            <button onClick={() => setSelectedYear(y => y + 1)} className="btn btn-ghost"><i className="ri-arrow-right-s-line text-xl"></i></button>
+                        </div>
+
+                        {/* --- 1. GRÁFICA MENSUAL DINÁMICA --- */}
+                        <div className="panel border-t-4 border-blue-500">
+                            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><i className="ri-bar-chart-grouped-line text-blue-400"></i> Balance Mensual {selectedYear}</h3><button onClick={exportAnnualReport} className="btn bg-green-700 hover:bg-green-600 text-white text-xs"><i className="ri-file-excel-2-line"></i></button></div>
+                            <div className="mb-6"><MonthlyComparisonChart monthlyData={monthlyData} /></div>
+                        </div>
+
+                        {/* --- 2. PROMEDIOS ANUALES --- */}
+                        <div className="panel overflow-hidden border-l-4 border-purple-500">
+                            <h3 className="font-bold mb-4 text-purple-400 uppercase text-sm tracking-wider">Promedios {selectedYear} vs Presupuesto</h3>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Tabla Secciones */}
+                                <div>
+                                    <h4 className="text-xs text-gray-400 font-bold mb-2 uppercase">Por Sección</h4>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm text-left border-collapse">
+                                            <thead className="bg-slate-900 text-xs text-gray-400 uppercase"><tr><th className="p-2">Sección</th><th className="p-2 text-right">Promedio</th><th className="p-2 text-right">Límite</th><th className="p-2 text-right">Diff</th></tr></thead>
+                                            <tbody className="divide-y divide-slate-700 font-mono text-xs">
+                                                {Object.entries(sectionAverages).map(([sec, data], idx) => {
+                                                    const avg = data.total / monthsCount;
+                                                    const diff = data.budget - avg;
+                                                    const isGood = sec.includes('AHORRO') ? diff <= 0 : diff >= 0;
+                                                    return (<tr key={idx} className="hover:bg-slate-800/50"><td className="p-2 font-sans font-bold text-slate-200">{sec}</td><td className="p-2 text-right text-white">${avg.toLocaleString(undefined, {maximumFractionDigits:0})}</td><td className="p-2 text-right text-gray-500">${data.budget.toLocaleString()}</td><td className={`p-2 text-right font-bold ${isGood ? 'text-green-400' : 'text-red-400'}`}>{diff > 0 ? '+' : ''}{diff.toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>);
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                {/* Tabla Top Categorías */}
+                                <div>
+                                    <h4 className="text-xs text-gray-400 font-bold mb-2 uppercase">Top Desviaciones (Categorías)</h4>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm text-left border-collapse">
+                                            <thead className="bg-slate-900 text-xs text-gray-400 uppercase"><tr><th className="p-2">Categoría</th><th className="p-2 text-right">Promedio</th><th className="p-2 text-right">Diff</th></tr></thead>
+                                            <tbody className="divide-y divide-slate-700 font-mono text-xs">
+                                                {Object.entries(categoryAverages)
+                                                    .map(([cat, data]) => ({ cat, avg: data.total/monthsCount, budget: data.budget, diff: data.budget - (data.total/monthsCount) }))
+                                                    .sort((a,b) => Math.abs(b.diff) - Math.abs(a.diff))
+                                                    .slice(0, 6) 
+                                                    .map((row, idx) => {
+                                                        const isGood = row.diff >= 0; 
+                                                        return (<tr key={idx} className="hover:bg-slate-800/50"><td className="p-2 font-sans text-slate-300">{row.cat}</td><td className="p-2 text-right text-white">${row.avg.toLocaleString(undefined, {maximumFractionDigits:0})}</td><td className={`p-2 text-right font-bold ${isGood ? 'text-green-400' : 'text-red-400'}`}>{row.diff > 0 ? '+' : ''}{row.diff.toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>);
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* --- 3. GASTOS MENSUALES POR SECCIÓN --- */}
+                        <div className="panel overflow-hidden border-t-4 border-indigo-500">
+                             <h3 className="font-bold mb-4 text-indigo-400 uppercase text-sm tracking-wider">Desglose Mensual por Sección ({selectedYear})</h3>
+                             <div className="overflow-x-auto scrollbar-hide">
+                                <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-slate-900 text-gray-400 uppercase">
+                                        <tr>
+                                            <th className="p-2 sticky left-0 bg-slate-900 z-10">Sección</th>
+                                            {monthNames.map(m => <th key={m} className="p-2 text-right min-w-[60px]">{m}</th>)}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700 font-mono">
+                                        {Object.entries(sectionMonthly).map(([sec, months], idx) => (
+                                            <tr key={idx} className="hover:bg-slate-800/50">
+                                                <td className="p-2 font-sans font-bold text-slate-200 sticky left-0 bg-slate-800 z-10 border-r border-slate-600">{sec}</td>
+                                                {months.map((val, mIdx) => (
+                                                    <td key={mIdx} className={`p-2 text-right ${val === 0 ? 'text-gray-600' : 'text-white'}`}>
+                                                        {val > 0 ? `$${Math.round(val/1000)}k` : '-'}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                             </div>
+                        </div>
+
+                        {/* --- 4. GASTOS MENSUALES POR CATEGORÍA --- */}
+                        <div className="panel overflow-hidden border-t-4 border-orange-500">
+                             <h3 className="font-bold mb-4 text-orange-400 uppercase text-sm tracking-wider">Desglose Mensual por Categoría ({selectedYear})</h3>
+                             <div className="overflow-x-auto max-h-96">
+                                <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-slate-900 text-gray-400 uppercase sticky top-0 z-20">
+                                        <tr>
+                                            <th className="p-2 sticky left-0 bg-slate-900 z-30">Categoría</th>
+                                            {monthNames.map(m => <th key={m} className="p-2 text-right min-w-[70px]">{m}</th>)}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700 font-mono">
+                                        {Object.entries(categoryMonthly).sort().map(([cat, months], idx) => (
+                                            <tr key={idx} className="hover:bg-slate-800/50">
+                                                <td className="p-2 font-sans text-slate-300 sticky left-0 bg-slate-800 z-10 border-r border-slate-600">{cat}</td>
+                                                {months.map((val, mIdx) => (
+                                                    <td key={mIdx} className={`p-2 text-right ${val === 0 ? 'text-gray-700' : 'text-gray-300'}`}>
+                                                        {val > 0 ? val.toLocaleString() : '-'}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                             </div>
+                        </div>
+
+                        {/* Reloj Restante */}
+                        <div className="panel bg-slate-900 border-2 border-red-900 shadow-xl relative overflow-hidden">
+                            <div className="flex items-center gap-2 mb-6 border-b border-gray-800 pb-2"><i className="ri-flag-2-line text-red-500 text-xl"></i><h3 className="font-bold text-lg text-white">PROYECTO LIBERTAD</h3></div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                                <div className="text-center md:text-left">
+                                    <div className="text-gray-500 text-sm mb-1 uppercase tracking-widest">Tiempo Restante</div>
+                                    <div className="text-5xl md:text-6xl font-bold text-white digital-clock font-mono">{daysRemaining.toLocaleString()}<span className="text-lg text-red-500 ml-2">DÍAS</span></div>
+                                    <div className="text-sm text-gray-400 mt-2 flex items-center justify-center md:justify-start gap-2">Fecha Objetivo: <span className="text-white font-bold">{new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'long', year: 'numeric' }).format(targetDate)}</span><button onClick={() => setTargetDateModalOpen(true)} className="text-blue-400 hover:text-white transition"><i className="ri-pencil-line"></i></button></div>
+                                </div>
+                                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                    <div className="flex justify-between items-center mb-2"><span className="text-xs text-yellow-500 font-bold uppercase"><i className="ri-sun-line"></i> Veranos Restantes</span><span className="text-xl font-bold text-white">{summersRemaining}</span></div>
+                                    <div className="w-full bg-slate-700 h-2 rounded-full mb-4"><div className="bg-yellow-500 h-full" style={{width: `${Math.min(100, (summersRemaining/45)*100)}%`}}></div></div>
+                                    <p className="text-gray-300 italic text-xs leading-relaxed border-l-2 border-red-500 pl-3">"El tiempo es el único activo que no se recupera."</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const EditModal = () => { if (!editingItem) return null; const [val, setVal] = useState(editingItem.value); const [rate, setRate] = useState(editingItem.rate || 0); const [name, setName] = useState(editingItem.name); return (<div className="modal-overlay"><div className="modal-content animate-fade-in"><h3 className="font-bold text-xl mb-4 text-blue-400">Editar Detalle</h3><label className="block text-xs text-gray-400 mb-1">Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="input-dark mb-3" /><label className="block text-xs text-gray-400 mb-1">Saldo Total</label><input type="number" value={val} onChange={e => setVal(e.target.value)} className="input-dark mb-4 text-2xl font-mono" />{editingItem.itemType === 'debt' && (<><label className="block text-xs text-gray-400 mb-1">Tasa Interés (%)</label><input type="number" value={rate} onChange={e => setRate(e.target.value)} className="input-dark mb-4" /></>)}<div className="flex justify-end gap-2 mt-4"><button onClick={() => setEditingItem(null)} className="btn bg-slate-600 hover:bg-slate-500 text-white">Cancelar</button><button onClick={() => updateItem(editingItem.itemType, editingItem.id, val, rate, name)} className="btn btn-primary">Guardar</button></div></div></div>); };
+            const TransactionEditModal = () => { if (!editingTx) return null; const [amt, setAmt] = useState(editingTx.amount); const [cmt, setCmt] = useState(editingTx.comment); const [sec, setSec] = useState(editingTx.section || Object.keys(safeData.budgetConfig)[0]); const [cat, setCat] = useState(editingTx.category || editingTx.source); const [date, setDate] = useState(editingTx.date); const isIncome = editingTx.type === 'income'; return (<div className="modal-overlay"><div className="modal-content animate-fade-in"><h3 className="font-bold text-xl mb-4 text-yellow-400">Corregir Movimiento</h3><label className="block text-xs text-gray-400 mb-1">Fecha</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-dark mb-3" /><label className="block text-xs text-gray-400 mb-1">Monto</label><input type="number" value={amt} onChange={e => setAmt(e.target.value)} className="input-dark mb-3 text-xl font-mono" /><label className="block text-xs text-gray-400 mb-1">Comentario</label><input type="text" value={cmt} onChange={e => setCmt(e.target.value)} className="input-dark mb-3" /><div className="flex justify-end gap-2 mt-4"><button onClick={() => setEditingTx(null)} className="btn bg-slate-600 hover:bg-slate-500 text-white">Cancelar</button><button onClick={() => saveTransactionChanges(editingTx.id, editingTx.type, amt, cmt, cat, sec, date)} className="btn btn-primary">Guardar</button></div></div></div>); };
+            const PaymentModal = () => { if (!paymentItem) return null; const [amount, setAmount] = useState(""); const isAsset = paymentItem.type === 'asset'; return (<div className="modal-overlay"><div className="modal-content animate-fade-in border-t-4 border-yellow-500"><h3 className="font-bold text-xl mb-2 text-white">{isAsset ? '💰 Inyectar Ahorro' : '⚔️ Abonar a Deuda'}</h3><p className="text-sm text-gray-400 mb-4">{isAsset ? 'Sumar dinero a:' : 'Restar deuda a:'} <span className="text-white font-bold">{paymentItem.item.name}</span></p><label className="block text-xs text-gray-500 mb-1">Cantidad a {isAsset ? 'Ingresar' : 'Pagar'}</label><input type="number" autoFocus value={amount} onChange={e => setAmount(e.target.value)} className="input-dark mb-6 text-2xl font-mono text-center" placeholder="$0.00" /><div className="flex justify-end gap-2"><button onClick={() => setPaymentItem(null)} className="btn btn-ghost">Cancelar</button><button onClick={() => handlePayment(amount)} className={`btn ${isAsset ? 'btn-success' : 'btn-danger'}`}>{isAsset ? 'Sumar (+)' : 'Restar (-)'}</button></div></div></div>); };
+            const TargetDateModal = () => { if (!targetDateModalOpen) return null; const [tempDate, setTempDate] = useState(safeData.targetDate); return (<div className="modal-overlay"><div className="modal-content animate-fade-in border-t-4 border-red-500 max-w-sm"><h3 className="font-bold text-xl mb-4 text-white">📅 Fecha de Retiro</h3><input type="date" value={tempDate} onChange={(e) => setTempDate(e.target.value)} className="input-dark text-center text-xl mb-6" /><div className="flex justify-end gap-2"><button onClick={() => setTargetDateModalOpen(false)} className="btn btn-ghost">Cancelar</button><button onClick={() => updateTargetDate(tempDate)} className="btn btn-primary">Confirmar</button></div></div></div>); };
+            const BudgetConfigModal = () => { const [newCatName, setNewCatName] = useState(""); const [newCatLimit, setNewCatLimit] = useState(""); const [activeSectionForAdd, setActiveSectionForAdd] = useState(null); const [newSectionName, setNewSectionName] = useState(""); if (!configModalOpen) return null; return (<div className="modal-overlay"><div className="modal-content animate-fade-in max-w-2xl"><div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-2"><h3 className="font-bold text-2xl text-blue-400">⚙️ Configuración</h3><button onClick={() => setConfigModalOpen(false)} className="text-gray-400 hover:text-white"><i className="ri-close-line text-2xl"></i></button></div><div className="space-y-8">{Object.entries(safeData.budgetConfig).map(([secName, config]) => (<div key={secName} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700"><div className="flex justify-between items-center mb-4"><div className="flex items-center gap-2"><h4 className="font-bold text-lg text-white">{secName}</h4><button onClick={() => deleteBudgetSection(secName)} className="text-red-500 hover:text-red-300 text-xs"><i className="ri-delete-bin-line"></i></button></div><div className="flex items-center gap-2"><label className="text-xs text-gray-500">Límite:</label><input type="number" value={config.limit} onChange={(e) => updateBudgetSectionLimit(secName, e.target.value)} className="input-dark w-24 text-right font-mono text-blue-300 border-blue-900/50"/></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">{Object.entries(config.categories).map(([catName, limit]) => (<div key={catName} className="flex justify-between items-center bg-slate-900 p-2 rounded text-sm group"><span className="text-gray-300">{catName}</span><div className="flex items-center gap-2"><input type="number" value={limit} onChange={(e) => updateBudgetCategoryLimit(secName, catName, e.target.value)} className="input-dark w-20 text-right py-1 text-xs"/><button onClick={() => deleteBudgetCategory(secName, catName)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition"><i className="ri-close-circle-line"></i></button></div></div>))}</div><div className="flex gap-2 items-center mt-2 border-t border-slate-700 pt-2"><input placeholder={`Nueva categoría...`} className="input-dark text-xs flex-1" value={activeSectionForAdd === secName ? newCatName : ""} onChange={(e) => { setActiveSectionForAdd(secName); setNewCatName(e.target.value); }} onFocus={() => setActiveSectionForAdd(secName)}/><input type="number" placeholder="$" className="input-dark text-xs w-20" value={activeSectionForAdd === secName ? newCatLimit : ""} onChange={(e) => { setActiveSectionForAdd(secName); setNewCatLimit(e.target.value); }}/><button onClick={() => { addBudgetCategory(secName, newCatName, newCatLimit); setNewCatName(""); setNewCatLimit(""); }} className="btn btn-sm btn-primary"><i className="ri-add-line"></i></button></div></div>))}<div className="bg-slate-800/30 p-4 rounded-lg border border-dashed border-gray-600 flex justify-between items-center"><span className="text-sm font-bold text-gray-400">NUEVA SECCIÓN</span><div className="flex gap-2"><input placeholder="Nombre" className="input-dark text-sm w-48" value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)}/><button onClick={() => { addBudgetSection(newSectionName); setNewSectionName(""); }} className="btn btn-sm btn-success">Crear</button></div></div></div><div className="mt-8 flex justify-end"><button onClick={() => setConfigModalOpen(false)} className="btn btn-primary w-full md:w-auto">Guardar y Cerrar</button></div></div></div>); };
+            
+            // --- SYNC MODAL ---
+            const SyncModal = () => { 
+                const [inputCloudId, setInputCloudId] = useState(cloudId);
+                if (!syncModalOpen) return null; 
+                return (
+                    <div className="modal-overlay">
+                        <div className="modal-content animate-fade-in border-t-4 border-cyan-500">
+                            <h3 className="font-bold text-xl mb-4 text-white flex items-center gap-2"><i className="ri-cloud-line text-cyan-400"></i> Conectar Manada (Sincronización)</h3>
+                            <p className="text-sm text-gray-400 mb-4 bg-slate-900 p-3 rounded">
+                                <strong>IMPORTANTE:</strong> Para sincronizar dispositivos, crea una <strong>Clave Secreta</strong> (ej. <code>LOBO-MASTER-2025</code>).<br/><br/>
+                                <span className="text-yellow-400">1. En tu dispositivo con datos:</span> Pon la clave y dale <strong>"Guardar y Subir"</strong>.<br/>
+                                <span className="text-blue-400">2. En el dispositivo nuevo:</span> Pon la <strong>misma clave</strong> y dale <strong>"Conectar y Bajar"</strong>.
+                            </p>
+                            <label className="block text-xs text-cyan-400 mb-1 uppercase font-bold">Tu Clave Secreta</label>
+                            <input type="text" value={inputCloudId} onChange={(e) => setInputCloudId(e.target.value)} placeholder="Ej. LOBO-MASTER" className="input-dark mb-6 text-xl text-center font-bold tracking-wider uppercase" />
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setSyncModalOpen(false)} className="btn btn-ghost">Cancelar</button>
+                                <button onClick={() => handleSync(inputCloudId)} className="btn bg-cyan-600 hover:bg-cyan-500 text-white">
+                                    {data && (data.transactions.length > 0 || data.assets.length > 9) ? "Guardar y Subir" : "Conectar y Bajar"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ); 
+            };
+
+            return (
+                <div className="min-h-screen pb-20 md:pb-0 md:pl-64">
+                    {editingItem && <EditModal />}
+                    {editingTx && <TransactionEditModal />} 
+                    {paymentItem && <PaymentModal />} 
+                    {configModalOpen && <BudgetConfigModal />}
+                    {targetDateModalOpen && <TargetDateModal />}
+                    {syncModalOpen && <SyncModal />}
+
+                    {/* Navbar Lateral Desktop */}
+                    <div className="hidden md:flex flex-col w-64 fixed inset-y-0 left-0 bg-slate-900 border-r border-slate-700 p-4">
+                        <h1 className="text-2xl font-bold text-blue-500 mb-1 tracking-tighter">PLAN LOBO 🐺</h1>
+                        <p className="text-xs text-slate-500 mb-6">V7.9 Sync Definitiva</p>
+                        
+                        {/* Status Nube */}
+                        <div onClick={() => setSyncModalOpen(true)} className="mb-6 p-3 bg-slate-800 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-700 transition group">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] uppercase font-bold text-gray-500">Estado de Nube</span>
+                                <i className={`ri-cloud-fill ${cloudId ? 'text-green-500' : 'text-gray-600'}`}></i>
+                            </div>
+                            <div className="text-xs font-mono text-cyan-400 truncate">
+                                {cloudId ? cloudId : "Sin Conexión"}
+                            </div>
+                            <div className="text-[10px] text-gray-500 mt-1 group-hover:text-white">Clic para configurar</div>
+                        </div>
+
+                        <nav className="space-y-2">
+                            <button onClick={() => setView('global')} className={`w-full text-left p-3 rounded flex items-center gap-3 ${view === 'global' ? 'bg-blue-600 shadow-lg' : 'hover:bg-slate-800 text-gray-400'}`}><i className="ri-earth-line text-xl"></i> Global</button>
+                            <button onClick={() => setView('monthly')} className={`w-full text-left p-3 rounded flex items-center gap-3 ${view === 'monthly' ? 'bg-purple-600 shadow-lg' : 'hover:bg-slate-800 text-gray-400'}`}><i className="ri-calendar-line text-xl"></i> Mensual</button>
+                            <button onClick={() => setView('summary')} className={`w-full text-left p-3 rounded flex items-center gap-3 ${view === 'summary' ? 'bg-yellow-600 shadow-lg' : 'hover:bg-slate-800 text-white'}`}><i className="ri-file-list-3-line text-xl"></i> Estrategia</button>
+                            <button onClick={() => setView('simulator')} className={`w-full text-left p-3 rounded flex items-center gap-3 ${view === 'simulator' ? 'bg-indigo-600 shadow-lg' : 'hover:bg-slate-800 text-gray-400'}`}><i className="ri-rocket-2-line text-xl"></i> Simulador</button>
+                        </nav>
+                    </div>
+
+                    {/* Navbar Mobile Top */}
+                    <div className="md:hidden fixed top-0 left-0 right-0 bg-slate-900 border-b border-slate-700 p-3 z-40 flex justify-between items-center shadow-lg">
+                         <div className="flex items-center gap-2">
+                             <h1 className="text-lg font-bold text-blue-500">PLAN LOBO 🐺</h1>
+                         </div>
+                         <button onClick={() => setSyncModalOpen(true)} className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${cloudId ? 'bg-green-900/30 border-green-500 text-green-400' : 'bg-slate-800 border-slate-600 text-gray-400'}`}>
+                             <i className="ri-cloud-line"></i> {cloudId ? 'ON' : 'OFF'}
+                         </button>
+                    </div>
+
+                    {/* Navbar Mobile Bottom */}
+                    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-700 flex justify-around p-4 z-50 safe-area-pb">
+                        <button onClick={() => setView('global')} className={`flex flex-col items-center ${view === 'global' ? 'text-blue-400' : 'text-gray-500'}`}><i className="ri-earth-line text-2xl"></i></button>
+                        <button onClick={() => setView('monthly')} className={`flex flex-col items-center ${view === 'monthly' ? 'text-purple-400' : 'text-gray-500'}`}><i className="ri-calendar-line text-2xl"></i></button>
+                        <button onClick={() => setView('summary')} className={`flex flex-col items-center ${view === 'summary' ? 'text-yellow-400' : 'text-gray-500'}`}><i className="ri-file-list-3-line text-2xl"></i></button>
+                        <button onClick={() => setView('simulator')} className={`flex flex-col items-center ${view === 'simulator' ? 'text-indigo-400' : 'text-gray-500'}`}><i className="ri-rocket-2-line text-2xl"></i></button>
+                    </div>
+
+                    <main className="p-4 md:p-8 max-w-6xl mx-auto mt-14 md:mt-0">
+                        {view === 'global' && <GlobalView />}
+                        {view === 'monthly' && <MonthlyView />}
+                        {view === 'summary' && <SummaryView />}
+                        {view === 'simulator' && <SimulatorView />}
+                    </main>
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
