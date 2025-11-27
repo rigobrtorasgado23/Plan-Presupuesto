@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plan Lobo - V7.5 Robusto</title>
+    <title>Plan Lobo - V7.7 Estrategia Maestra</title>
     
     <!-- LIBRERÍAS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -40,6 +40,10 @@
         /* Tooltip en gráficas */
         .chart-bar:hover { opacity: 0.8; }
         .chart-group:hover .chart-tooltip { display: block; }
+        
+        /* Scrollbars para tablas largas */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 
     <!-- FIREBASE MODULES -->
@@ -181,7 +185,7 @@
                         </defs>
                         <path d={`M 0 ${height} L ${points.split(' ')[0]} ${points.replaceAll(' ',', ')} L ${points.split(' ').slice(-1)[0].split(',')[0]} ${height} Z`} fill="url(#trendGradient)" stroke="none" />
                         <line x1="0" y1={height} x2={width} y2={height} stroke="#334155" strokeWidth="2" />
-                        <line x1="0" y1="0" x2="0" y2={height} stroke="#334155" strokeWidth="2" />
+                        <line x1="0" y1={0} x2={width} y2={0} stroke="#334155" strokeWidth="2" />
                         <line x1="0" y1={budgetY} x2={width} y2={budgetY} stroke="#64748b" strokeWidth="2" strokeDasharray="5,5" />
                         <text x="10" y={budgetY - 10} fontSize="20" fill="#64748b" fontWeight="bold">Límite: ${totalBudget.toLocaleString()}</text>
                         <polyline points={points} fill="none" stroke="#ef4444" strokeWidth="4" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
@@ -238,23 +242,30 @@
             );
         };
         
-        const AnnualComparisonChart = ({ annualData }) => {
-             const maxIncome = Math.max(...annualData.map(d => d.income));
-             const maxExpense = Math.max(...annualData.map(d => d.expense));
+        // --- NUEVA GRÁFICA MULTI-ANUAL ---
+        const MultiYearComparisonChart = ({ yearsData }) => {
+             // yearsData debe ser [{ year: 2025, income: X, expense: Y }, { year: 2026, ... }]
+             const maxIncome = Math.max(...yearsData.map(d => d.income));
+             const maxExpense = Math.max(...yearsData.map(d => d.expense));
              const maxVal = Math.max(maxIncome, maxExpense, 10000) * 1.15; 
              const height = 400; const width = 1200; 
              const paddingX = 60; const paddingY = 40;
              const chartW = width - (paddingX * 2); const chartH = height - (paddingY * 2);
-             const barWidth = (chartW / 12) * 0.35; const groupWidth = chartW / 12;
+             
+             // Dynamic width logic in case of few years
+             const numYears = Math.max(yearsData.length, 5); // Minimum 5 slots to look good
+             const groupWidth = chartW / numYears;
+             const barWidth = groupWidth * 0.35;
              
              return (
                 <div className="w-full overflow-x-auto bg-slate-900 rounded-lg p-2 border border-slate-700">
                     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible min-w-[800px]" preserveAspectRatio="xMidYMid meet">
+                         {/* Grid Lines */}
                          {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
                              const y = paddingY + chartH - (chartH * tick);
                              return (<g key={tick}><line x1={paddingX} y1={y} x2={width - paddingX} y2={y} stroke="#334155" strokeWidth="1" strokeDasharray={tick === 0 ? "" : "4,4"} /><text x={paddingX - 10} y={y + 5} fill="#64748b" fontSize="14" textAnchor="end">${Math.round(maxVal * tick / 1000)}k</text></g>);
                          })}
-                        {annualData.map((d, i) => {
+                        {yearsData.map((d, i) => {
                             const xCenter = paddingX + (i * groupWidth) + (groupWidth / 2);
                             const hIncome = (d.income / maxVal) * chartH;
                             const hExpense = (d.expense / maxVal) * chartH;
@@ -268,14 +279,14 @@
                                     <rect x={xExpense} y={yBase - hExpense} width={barWidth} height={hExpense} fill="#ef4444" rx="4" className="chart-bar transition-opacity duration-200" />
                                     {hIncome > 20 && <text x={xIncome + barWidth/2} y={yBase - hIncome - 5} fill="#4ade80" fontSize="12" textAnchor="middle" fontWeight="bold">${Math.round(d.income/1000)}k</text>}
                                     {hExpense > 20 && <text x={xExpense + barWidth/2} y={yBase - hExpense - 5} fill="#f87171" fontSize="12" textAnchor="middle" fontWeight="bold">${Math.round(d.expense/1000)}k</text>}
-                                    <text x={xCenter} y={height - 10} fill="#cbd5e1" fontSize="14" textAnchor="middle" fontWeight="bold">{d.month}</text>
+                                    <text x={xCenter} y={height - 10} fill="#cbd5e1" fontSize="16" textAnchor="middle" fontWeight="bold">{d.year}</text>
                                 </g>
                             );
                         })}
                     </svg>
                     <div className="flex justify-center gap-6 mt-2 text-sm">
                         <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded"></div> <span className="text-gray-300">Ingresos Totales</span></div>
-                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded"></div> <span className="text-gray-300">Gastos Reales</span></div>
+                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded"></div> <span className="text-gray-300">Gastos Totales</span></div>
                     </div>
                 </div>
              );
@@ -305,7 +316,7 @@
             const [user, setUser] = useState(null);
             const [data, setData] = useState(null); 
             const [loading, setLoading] = useState(true);
-            const [loadingTooLong, setLoadingTooLong] = useState(false); // New State
+            const [loadingTooLong, setLoadingTooLong] = useState(false); 
             const [syncStatus, setSyncStatus] = useState('disconnected');
             const [cloudId, setCloudId] = useState(localStorage.getItem('lobo_cloud_id') || "");
             const [view, setView] = useState('simulator'); 
@@ -317,7 +328,7 @@
             const [targetDateModalOpen, setTargetDateModalOpen] = useState(false); 
             const [syncModalOpen, setSyncModalOpen] = useState(false);
 
-            // --- LOADING WATCHDOG (NUEVO) ---
+            // --- LOADING WATCHDOG ---
             useEffect(() => {
                 if (loading) {
                     const timer = setTimeout(() => setLoadingTooLong(true), 5000); // 5 sec timeout
@@ -351,7 +362,7 @@
                             (error) => {
                                 console.error("Firestore Error:", error);
                                 setSyncStatus('error');
-                                // If permission denied (common with custom IDs without rules), fallback
+                                setData(INITIAL_DATA); 
                                 alert("Error de conexión o permisos. Usando modo local temporalmente.");
                                 setLoading(false);
                             }
@@ -392,6 +403,7 @@
                         }
                     } catch(e) {
                         alert("Error al conectar: Posiblemente permisos de red.");
+                        setData(INITIAL_DATA); // Fallback
                     }
                 }
                 setSyncModalOpen(false);
@@ -399,47 +411,38 @@
             };
 
             const forceStart = () => {
-                // Emergency Hatch
                 setData(INITIAL_DATA);
                 setLoading(false);
                 setSyncStatus('disconnected');
             };
 
-            // --- PANTALLA DE CARGA (Con botón de escape) ---
+            // --- PANTALLA DE CARGA ---
             if (loading && !data) return (
                 <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-6 text-white p-4 text-center">
                     <div className="loader"></div>
                     <p className="text-xl animate-pulse">Conectando con la Manada...</p>
-                    
                     {loadingTooLong && (
                         <div className="bg-red-900/50 border border-red-500 p-4 rounded-lg max-w-sm animate-fade-in">
                             <p className="text-sm mb-3">⚠️ La conexión está tardando mucho. Puede ser un problema de red o de clave.</p>
-                            <button onClick={forceStart} className="btn bg-red-600 hover:bg-red-500 text-white w-full">
-                                Forzar Inicio (Modo Local)
-                            </button>
+                            <button onClick={forceStart} className="btn bg-red-600 hover:bg-red-500 text-white w-full">Forzar Inicio (Modo Local)</button>
                         </div>
                     )}
                 </div>
             );
 
-            // --- CÁLCULOS GENERALES ---
-            const totalAssets = data.assets.reduce((sum, i) => sum + Number(i.value), 0);
-            const totalDebts = data.debts.reduce((sum, i) => sum + Number(i.value), 0);
+            // --- CÁLCULOS GENERALES (SAFE CHECK) ---
+            const safeData = data || INITIAL_DATA;
+            const totalAssets = (safeData.assets || []).reduce((sum, i) => sum + Number(i.value), 0);
+            const totalDebts = (safeData.debts || []).reduce((sum, i) => sum + Number(i.value), 0);
             const netWorth = totalAssets - totalDebts;
             const getMonthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
             const activeMonthKey = getMonthKey(currentDate);
             const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
             const daysInCurrentMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
-            const monthlyTransactions = data.transactions.filter(t => t.date.startsWith(activeMonthKey));
-            const monthlyIncomes = data.incomes.filter(i => i.date.startsWith(activeMonthKey));
+            const monthlyTransactions = (safeData.transactions || []).filter(t => t.date.startsWith(activeMonthKey));
+            const monthlyIncomes = (safeData.incomes || []).filter(i => i.date.startsWith(activeMonthKey));
             const totalMonthlyIncome = monthlyIncomes.reduce((acc, i) => acc + i.amount, 0);
             const totalMonthlyExpenses = monthlyTransactions.reduce((acc, t) => acc + t.amount, 0);
-
-            // --- CÁLCULOS ANUALES ---
-            const currentYear = new Date().getFullYear();
-            const annualData = Array(12).fill(null).map((_, i) => ({ monthIndex: i, month: ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'][i], income: 0, expense: 0 }));
-            data.incomes.forEach(inc => { const [y, m, d] = inc.date.split('-').map(Number); if (y === currentYear) annualData[m - 1].income += inc.amount; });
-            data.transactions.forEach(tx => { const [y, m, d] = tx.date.split('-').map(Number); if (y === currentYear) annualData[m - 1].expense += tx.amount; });
 
             // --- ACCIONES ---
             const addAsset = (name, value, type) => { saveData({ ...data, assets: [...data.assets, { id: Date.now(), name, value: Number(value), type }] }); };
@@ -488,8 +491,8 @@
                             <div className="panel border-l-4 border-red-500"><div className="text-sm text-red-300 font-bold tracking-widest">DEUDAS</div><div className="text-4xl font-bold text-white mt-2">${totalDebts.toLocaleString()}</div></div>
                         </div>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-gray-700 pb-2"><h3 className="text-xl font-bold text-green-400">🏰 Tus Activos</h3></div>{data.assets.map(asset => (<div key={asset.id} className="flex justify-between items-center p-3 bg-slate-800 rounded-lg border border-slate-700"><div onClick={() => setEditingItem({...asset, itemType: 'asset'})} className="cursor-pointer flex-1"><div className="font-bold text-slate-200">{asset.name}</div><div className="text-xs text-gray-500 uppercase">{asset.type === 'real_estate' ? '🏠 Inmueble' : '💰 Financiero'}</div></div><div className="flex items-center gap-3"><div className="text-xl font-mono font-bold text-green-400">${asset.value.toLocaleString()}</div>{asset.type !== 'real_estate' && (<button onClick={() => setPaymentItem({ item: asset, type: 'asset' })} className="w-8 h-8 rounded-full bg-green-900 text-green-400 hover:bg-green-700 flex items-center justify-center font-bold text-lg">+</button>)}</div></div>))}<div className="panel bg-slate-800/50 border-dashed border-gray-600 mt-4"><div className="text-xs font-bold text-gray-400 mb-2">AGREGAR NUEVO ACTIVO</div><div className="flex gap-2 mb-2"><input placeholder="Nombre" value={newName} onChange={e=>setNewName(e.target.value)} className="input-dark w-1/3" /><input type="number" placeholder="$ Valor" value={newValue} onChange={e=>setNewValue(e.target.value)} className="input-dark w-1/3" /><select value={newType} onChange={e=>setNewType(e.target.value)} className="input-dark w-1/3"><option value="investment">Inversión</option><option value="real_estate">Inmueble</option><option value="cash">Efectivo</option></select></div><button onClick={() => {if(newName && newValue) { addAsset(newName, newValue, newType); setNewName(""); setNewValue(""); }}} className="btn btn-primary w-full text-xs">Guardar Nuevo</button></div></div>
-                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-gray-700 pb-2"><h3 className="text-xl font-bold text-red-400">⚔️ Tus Deudas</h3></div>{data.debts.map(debt => (<div key={debt.id} className={`flex justify-between items-center p-3 bg-slate-800 rounded-lg border-l-4 ${debt.type === 'toxic' ? 'border-red-500' : 'border-green-500'}`}><div onClick={() => setEditingItem({...debt, itemType: 'debt'})} className="cursor-pointer flex-1"><div className="font-bold text-slate-200">{debt.name}</div><div className="text-xs text-gray-500">Tasa: {debt.rate}% Anual</div></div><div className="flex items-center gap-3"><div className="text-xl font-mono font-bold text-red-400">${debt.value.toLocaleString()}</div><button onClick={() => setPaymentItem({ item: debt, type: 'debt' })} className="w-8 h-8 rounded-full bg-red-900 text-red-400 hover:bg-red-700 flex items-center justify-center font-bold">↓</button></div></div>))}</div>
+                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-gray-700 pb-2"><h3 className="text-xl font-bold text-green-400">🏰 Tus Activos</h3></div>{safeData.assets.map(asset => (<div key={asset.id} className="flex justify-between items-center p-3 bg-slate-800 rounded-lg border border-slate-700"><div onClick={() => setEditingItem({...asset, itemType: 'asset'})} className="cursor-pointer flex-1"><div className="font-bold text-slate-200">{asset.name}</div><div className="text-xs text-gray-500 uppercase">{asset.type === 'real_estate' ? '🏠 Inmueble' : '💰 Financiero'}</div></div><div className="flex items-center gap-3"><div className="text-xl font-mono font-bold text-green-400">${asset.value.toLocaleString()}</div>{asset.type !== 'real_estate' && (<button onClick={() => setPaymentItem({ item: asset, type: 'asset' })} className="w-8 h-8 rounded-full bg-green-900 text-green-400 hover:bg-green-700 flex items-center justify-center font-bold text-lg">+</button>)}</div></div>))}<div className="panel bg-slate-800/50 border-dashed border-gray-600 mt-4"><div className="text-xs font-bold text-gray-400 mb-2">AGREGAR NUEVO ACTIVO</div><div className="flex gap-2 mb-2"><input placeholder="Nombre" value={newName} onChange={e=>setNewName(e.target.value)} className="input-dark w-1/3" /><input type="number" placeholder="$ Valor" value={newValue} onChange={e=>setNewValue(e.target.value)} className="input-dark w-1/3" /><select value={newType} onChange={e=>setNewType(e.target.value)} className="input-dark w-1/3"><option value="investment">Inversión</option><option value="real_estate">Inmueble</option><option value="cash">Efectivo</option></select></div><button onClick={() => {if(newName && newValue) { addAsset(newName, newValue, newType); setNewName(""); setNewValue(""); }}} className="btn btn-primary w-full text-xs">Guardar Nuevo</button></div></div>
+                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-gray-700 pb-2"><h3 className="text-xl font-bold text-red-400">⚔️ Tus Deudas</h3></div>{safeData.debts.map(debt => (<div key={debt.id} className={`flex justify-between items-center p-3 bg-slate-800 rounded-lg border-l-4 ${debt.type === 'toxic' ? 'border-red-500' : 'border-green-500'}`}><div onClick={() => setEditingItem({...debt, itemType: 'debt'})} className="cursor-pointer flex-1"><div className="font-bold text-slate-200">{debt.name}</div><div className="text-xs text-gray-500">Tasa: {debt.rate}% Anual</div></div><div className="flex items-center gap-3"><div className="text-xl font-mono font-bold text-red-400">${debt.value.toLocaleString()}</div><button onClick={() => setPaymentItem({ item: debt, type: 'debt' })} className="w-8 h-8 rounded-full bg-red-900 text-red-400 hover:bg-red-700 flex items-center justify-center font-bold">↓</button></div></div>))}</div>
                         </div>
                     </div>
                 );
@@ -497,14 +500,14 @@
 
             const MonthlyView = () => {
                 const spentBySection = {}; const spentByCategory = {};
-                Object.keys(data.budgetConfig).forEach(sec => spentBySection[sec] = 0);
+                Object.keys(safeData.budgetConfig).forEach(sec => spentBySection[sec] = 0);
                 monthlyTransactions.forEach(t => { spentBySection[t.section] = (spentBySection[t.section] || 0) + t.amount; spentByCategory[t.category] = (spentByCategory[t.category] || 0) + t.amount; });
-                const pieData = Object.keys(data.budgetConfig).map((sec, idx) => ({ name: sec, value: spentBySection[sec] || 0, fill: ['#3b82f6', '#eab308', '#22c55e', '#a855f7', '#ec4899'][idx % 5] }));
+                const pieData = Object.keys(safeData.budgetConfig).map((sec, idx) => ({ name: sec, value: spentBySection[sec] || 0, fill: ['#3b82f6', '#eab308', '#22c55e', '#a855f7', '#ec4899'][idx % 5] }));
                 const barData = Object.entries(spentByCategory).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-                const totalMonthlyBudget = Object.values(data.budgetConfig).reduce((acc, curr) => acc + curr.limit, 0);
+                const totalMonthlyBudget = Object.values(safeData.budgetConfig).reduce((acc, curr) => acc + curr.limit, 0);
                 const today = new Date().toISOString().split('T')[0];
-                const [mode, setMode] = useState('expense'); const [amount, setAmount] = useState(""); const [section, setSection] = useState(Object.keys(data.budgetConfig)[0]); const [category, setCategory] = useState(Object.keys(data.budgetConfig[section]?.categories || {})[0] || ""); const [comment, setComment] = useState(""); const [source, setSource] = useState("SALARIO"); const [date, setDate] = useState(today); 
-                const handleSectionChange = (e) => { const newSec = e.target.value; setSection(newSec); const firstCat = Object.keys(data.budgetConfig[newSec]?.categories || {})[0]; setCategory(firstCat || ""); };
+                const [mode, setMode] = useState('expense'); const [amount, setAmount] = useState(""); const [section, setSection] = useState(Object.keys(safeData.budgetConfig)[0]); const [category, setCategory] = useState(Object.keys(safeData.budgetConfig[section]?.categories || {})[0] || ""); const [comment, setComment] = useState(""); const [source, setSource] = useState("SALARIO"); const [date, setDate] = useState(today); 
+                const handleSectionChange = (e) => { const newSec = e.target.value; setSection(newSec); const firstCat = Object.keys(safeData.budgetConfig[newSec]?.categories || {})[0]; setCategory(firstCat || ""); };
                 const submit = (e) => { e.preventDefault(); if (!amount || !date) return; if (mode === 'expense') addTransaction({ section, category, amount: Number(amount), comment }, date); else addIncome({ source, amount: Number(amount), comment }, date); setAmount(""); setComment(""); };
                 const allHistory = [...monthlyIncomes.map(i => ({ ...i, type: 'income', displayCategory: i.source, isPositive: true })), ...monthlyTransactions.map(t => ({ ...t, type: 'expense', displayCategory: t.category, isPositive: false }))].sort((a, b) => b.id - a.id);
                 const exportToExcel = () => { const wsData = [["Fecha", "Tipo", "Categoría/Fuente", "Comentario", "Monto"], ...allHistory.map(item => [item.date, item.isPositive ? "INGRESO" : "GASTO", item.displayCategory, item.comment, item.amount])]; const ws = XLSX.utils.aoa_to_sheet(wsData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Movimientos"); XLSX.writeFile(wb, `Lobo_Respaldo_${activeMonthKey}.xlsx`); };
@@ -522,7 +525,7 @@
                             <div className="flex gap-4 mb-4 bg-slate-900 p-1 rounded-lg"><button onClick={()=>setMode('expense')} className={`flex-1 py-2 rounded font-bold text-sm transition ${mode==='expense'?'bg-red-600 text-white':'text-gray-400'}`}>Gasto</button><button onClick={()=>setMode('income')} className={`flex-1 py-2 rounded font-bold text-sm transition ${mode==='income'?'bg-green-600 text-white':'text-gray-400'}`}>Ingreso</button></div>
                             <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end"> 
                                 <div><label className="text-[10px] text-gray-500">Fecha</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="input-dark" required /></div>
-                                {mode === 'expense' ? (<><div><label className="text-[10px] text-gray-500">Sección</label><select value={section} onChange={handleSectionChange} className="input-dark">{Object.keys(data.budgetConfig).map(s => <option key={s} value={s}>{s}</option>)}</select></div><div><label className="text-[10px] text-gray-500">Categoría</label><select value={category} onChange={e => setCategory(e.target.value)} className="input-dark">{data.budgetConfig[section] && Object.keys(data.budgetConfig[section].categories).map(c => <option key={c} value={c}>{c}</option>)}</select></div></>) : (<div className="md:col-span-2"><label className="text-[10px] text-gray-500">Fuente</label><select value={source} onChange={e => setSource(e.target.value)} className="input-dark"><option value="SALARIO">Salario Nómina</option><option value="VALES">Vales de Despensa</option><option value="AGUINALDO">Aguinaldo</option><option value="FONDO AHORRO">Fondo de Ahorro</option><option value="EXTRA">Ingreso Extra / Venta</option></select></div>)}
+                                {mode === 'expense' ? (<><div><label className="text-[10px] text-gray-500">Sección</label><select value={section} onChange={handleSectionChange} className="input-dark">{Object.keys(safeData.budgetConfig).map(s => <option key={s} value={s}>{s}</option>)}</select></div><div><label className="text-[10px] text-gray-500">Categoría</label><select value={category} onChange={e => setCategory(e.target.value)} className="input-dark">{safeData.budgetConfig[section] && Object.keys(safeData.budgetConfig[section].categories).map(c => <option key={c} value={c}>{c}</option>)}</select></div></>) : (<div className="md:col-span-2"><label className="text-[10px] text-gray-500">Fuente</label><select value={source} onChange={e => setSource(e.target.value)} className="input-dark"><option value="SALARIO">Salario Nómina</option><option value="VALES">Vales de Despensa</option><option value="AGUINALDO">Aguinaldo</option><option value="FONDO AHORRO">Fondo de Ahorro</option><option value="EXTRA">Ingreso Extra / Venta</option></select></div>)}
                                 <div><label className="text-[10px] text-gray-500">Monto</label><input type="number" value={amount} onChange={e=>setAmount(e.target.value)} className="input-dark" placeholder="$0.00" /></div><button className="btn btn-primary h-[38px] w-full"><i className="ri-save-3-line"></i></button>
                                 <div className="md:col-span-5"><label className="text-[10px] text-gray-500">Comentario</label><input type="text" value={comment} onChange={e=>setComment(e.target.value)} className="input-dark" placeholder="Detalle..." /></div>
                             </form>
@@ -533,31 +536,194 @@
             };
 
             const SummaryView = () => {
-                const totalIncome = monthlyIncomes.reduce((acc, i) => acc + i.amount, 0); const totalExpenses = monthlyTransactions.reduce((acc, t) => acc + t.amount, 0); const savings = totalIncome - totalExpenses; const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
-                const sectionData = Object.entries(data.budgetConfig).map(([secName, config]) => { const spent = monthlyTransactions.filter(t => t.section === secName).reduce((sum, t) => sum + t.amount, 0); const diff = config.limit - spent; const percent = config.limit > 0 ? (spent / config.limit) * 100 : 0; return { name: secName, limit: config.limit, spent, diff, percent }; });
-                const targetDate = new Date(data.targetDate); const now = new Date(); const daysRemaining = Math.max(0, Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24))); const summersRemaining = Math.max(0, Math.floor(daysRemaining / 365));
+                const currentYear = new Date().getFullYear();
                 
-                const exportAnnualReport = () => { const wsData = [ ["MES", "INGRESOS", "GASTOS", "DIFERENCIA", "AHORRO %"], ...annualData.map(d => [d.month, d.income, d.expense, d.income - d.expense, d.income > 0 ? ((d.income - d.expense)/d.income*100).toFixed(1)+'%' : '0%']) ]; const ws = XLSX.utils.aoa_to_sheet(wsData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Reporte_Anual_${currentYear}`); XLSX.writeFile(wb, `PlanLobo_Anual_${currentYear}.xlsx`); };
+                // --- 1. PREPARAR DATOS POR AÑO (HISTÓRICO) ---
+                const yearsMap = {};
+                // Inicializar 2025 para asegurar que aparezca
+                yearsMap[2025] = { year: 2025, income: 0, expense: 0 };
+                // Llenar con datos reales
+                (safeData.incomes || []).forEach(inc => {
+                    const y = parseInt(inc.date.split('-')[0]);
+                    if (y >= 2025) {
+                        if (!yearsMap[y]) yearsMap[y] = { year: y, income: 0, expense: 0 };
+                        yearsMap[y].income += inc.amount;
+                    }
+                });
+                (safeData.transactions || []).forEach(tx => {
+                    const y = parseInt(tx.date.split('-')[0]);
+                    if (y >= 2025) {
+                        if (!yearsMap[y]) yearsMap[y] = { year: y, income: 0, expense: 0 };
+                        yearsMap[y].expense += tx.amount;
+                    }
+                });
+                const multiYearData = Object.values(yearsMap).sort((a,b) => a.year - b.year);
+
+                // --- 2. CÁLCULO DE PROMEDIOS (TABLA PROMEDIO_ANUAL) ---
+                const activeMonths = new Set();
+                (safeData.transactions || []).forEach(t => { if(t.date.startsWith('2025')) activeMonths.add(t.date.substring(0,7)); });
+                const monthsCount = Math.max(activeMonths.size, 1); // Evitar división por cero
+
+                const categoryAverages = {};
+                const sectionAverages = {};
+
+                // Inicializar promedios con la config
+                Object.entries(safeData.budgetConfig).forEach(([sec, conf]) => {
+                    sectionAverages[sec] = { total: 0, budget: conf.limit };
+                    Object.entries(conf.categories).forEach(([cat, lim]) => {
+                        categoryAverages[cat] = { total: 0, budget: lim, section: sec };
+                    });
+                });
+
+                // Sumar gastos 2025
+                (safeData.transactions || []).filter(t => t.date.startsWith('2025')).forEach(t => {
+                    if (sectionAverages[t.section]) sectionAverages[t.section].total += t.amount;
+                    if (categoryAverages[t.category]) categoryAverages[t.category].total += t.amount;
+                });
+
+                // --- 3. DATOS MENSUALES POR SECCIÓN Y CATEGORÍA (TABLAS DETALLADAS) ---
+                const monthsList = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+                const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+                
+                const sectionMonthly = {};
+                const categoryMonthly = {};
+
+                // Inicializar estructuras
+                Object.keys(safeData.budgetConfig).forEach(sec => {
+                    sectionMonthly[sec] = Array(12).fill(0);
+                    Object.keys(safeData.budgetConfig[sec].categories).forEach(cat => {
+                        categoryMonthly[cat] = Array(12).fill(0);
+                    });
+                });
+
+                // Llenar datos mensuales 2025
+                (safeData.transactions || []).filter(t => t.date.startsWith('2025')).forEach(t => {
+                    const mIndex = parseInt(t.date.split('-')[1]) - 1;
+                    if (sectionMonthly[t.section]) sectionMonthly[t.section][mIndex] += t.amount;
+                    if (categoryMonthly[t.category]) categoryMonthly[t.category][mIndex] += t.amount;
+                });
+
+                const targetDate = new Date(safeData.targetDate); const now = new Date(); const daysRemaining = Math.max(0, Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24))); const summersRemaining = Math.max(0, Math.floor(daysRemaining / 365));
+                
+                const exportAnnualReport = () => { 
+                    /* Simplified Export Logic */ 
+                    const wsData = [ ["AÑO", "INGRESOS", "GASTOS"], ...multiYearData.map(d => [d.year, d.income, d.expense]) ]; 
+                    const ws = XLSX.utils.aoa_to_sheet(wsData); 
+                    const wb = XLSX.utils.book_new(); 
+                    XLSX.utils.book_append_sheet(wb, ws, `Estrategia`); 
+                    XLSX.writeFile(wb, `PlanLobo_Estrategia.xlsx`); 
+                };
 
                 return (
                     <div className="space-y-6 animate-fade-in">
                         <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 mb-6">
-                            <button onClick={() => { const d = new Date(currentDate); d.setMonth(d.getMonth()-1); setCurrentDate(d); }} className="btn btn-ghost"><i className="ri-arrow-left-s-line"></i></button>
-                            <div className="text-center"><div className="text-xs text-yellow-400 font-bold tracking-widest uppercase">Estrategia</div><div className="text-2xl font-bold text-white uppercase">{formatMonth(`${activeMonthKey}-01`)}</div></div>
-                            <button onClick={() => { const d = new Date(currentDate); d.setMonth(d.getMonth()+1); setCurrentDate(d); }} className="btn btn-ghost"><i className="ri-arrow-right-s-line"></i></button>
+                            <div className="text-center w-full"><div className="text-xs text-yellow-400 font-bold tracking-widest uppercase">Estrategia de Largo Plazo</div><div className="text-2xl font-bold text-white uppercase">VISIÓN {currentYear}+</div></div>
                         </div>
 
+                        {/* --- 1. GRÁFICA MULTI-ANUAL --- */}
                         <div className="panel border-t-4 border-blue-500">
-                            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><i className="ri-bar-chart-grouped-line text-blue-400"></i> Balance Anual {currentYear}</h3><button onClick={exportAnnualReport} className="btn bg-green-700 hover:bg-green-600 text-white text-xs"><i className="ri-file-excel-2-line"></i></button></div>
-                            <div className="mb-6"><AnnualComparisonChart annualData={annualData} /></div>
+                            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><i className="ri-bar-chart-grouped-line text-blue-400"></i> Balance Histórico (Por Años)</h3><button onClick={exportAnnualReport} className="btn bg-green-700 hover:bg-green-600 text-white text-xs"><i className="ri-file-excel-2-line"></i></button></div>
+                            <div className="mb-6"><MultiYearComparisonChart yearsData={multiYearData} /></div>
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="panel p-4 text-center border-l-4 border-green-500"><div className="text-[10px] text-gray-400 uppercase font-bold">Ingresos</div><div className="text-xl md:text-2xl font-bold text-white">${totalMonthlyIncome.toLocaleString()}</div></div>
-                            <div className="panel p-4 text-center border-l-4 border-red-500"><div className="text-[10px] text-gray-400 uppercase font-bold">Gastos</div><div className="text-xl md:text-2xl font-bold text-white">${totalMonthlyExpenses.toLocaleString()}</div></div>
-                            <div className="panel p-4 text-center border-l-4 border-blue-500 bg-slate-800"><div className="text-[10px] text-gray-400 uppercase font-bold">Ahorro</div><div className={`text-xl md:text-2xl font-bold ${savings >= 0 ? 'text-blue-400' : 'text-red-400'}`}>${savings.toLocaleString()}</div></div>
-                            <div className="panel p-4 text-center border-l-4 border-purple-500"><div className="text-[10px] text-gray-400 uppercase font-bold">Tasa Ahorro</div><div className="text-xl md:text-2xl font-bold text-white">{savingsRate.toFixed(1)}%</div></div>
+                        {/* --- 2. PROMEDIOS ANUALES --- */}
+                        <div className="panel overflow-hidden border-l-4 border-purple-500">
+                            <h3 className="font-bold mb-4 text-purple-400 uppercase text-sm tracking-wider">Promedios 2025 vs Presupuesto</h3>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Tabla Secciones */}
+                                <div>
+                                    <h4 className="text-xs text-gray-400 font-bold mb-2 uppercase">Por Sección</h4>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm text-left border-collapse">
+                                            <thead className="bg-slate-900 text-xs text-gray-400 uppercase"><tr><th className="p-2">Sección</th><th className="p-2 text-right">Promedio</th><th className="p-2 text-right">Límite</th><th className="p-2 text-right">Diff</th></tr></thead>
+                                            <tbody className="divide-y divide-slate-700 font-mono text-xs">
+                                                {Object.entries(sectionAverages).map(([sec, data], idx) => {
+                                                    const avg = data.total / monthsCount;
+                                                    const diff = data.budget - avg;
+                                                    const isGood = sec.includes('AHORRO') ? diff <= 0 : diff >= 0;
+                                                    return (<tr key={idx} className="hover:bg-slate-800/50"><td className="p-2 font-sans font-bold text-slate-200">{sec}</td><td className="p-2 text-right text-white">${avg.toLocaleString(undefined, {maximumFractionDigits:0})}</td><td className="p-2 text-right text-gray-500">${data.budget.toLocaleString()}</td><td className={`p-2 text-right font-bold ${isGood ? 'text-green-400' : 'text-red-400'}`}>{diff > 0 ? '+' : ''}{diff.toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>);
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                {/* Tabla Top Categorías (Resumida para no saturar) */}
+                                <div>
+                                    <h4 className="text-xs text-gray-400 font-bold mb-2 uppercase">Top Desviaciones (Categorías)</h4>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm text-left border-collapse">
+                                            <thead className="bg-slate-900 text-xs text-gray-400 uppercase"><tr><th className="p-2">Categoría</th><th className="p-2 text-right">Promedio</th><th className="p-2 text-right">Diff</th></tr></thead>
+                                            <tbody className="divide-y divide-slate-700 font-mono text-xs">
+                                                {Object.entries(categoryAverages)
+                                                    .map(([cat, data]) => ({ cat, avg: data.total/monthsCount, budget: data.budget, diff: data.budget - (data.total/monthsCount) }))
+                                                    .sort((a,b) => Math.abs(b.diff) - Math.abs(a.diff)) // Ordenar por mayor impacto
+                                                    .slice(0, 6) // Solo mostrar las 6 más críticas
+                                                    .map((row, idx) => {
+                                                        const isGood = row.diff >= 0; 
+                                                        return (<tr key={idx} className="hover:bg-slate-800/50"><td className="p-2 font-sans text-slate-300">{row.cat}</td><td className="p-2 text-right text-white">${row.avg.toLocaleString(undefined, {maximumFractionDigits:0})}</td><td className={`p-2 text-right font-bold ${isGood ? 'text-green-400' : 'text-red-400'}`}>{row.diff > 0 ? '+' : ''}{row.diff.toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>);
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
+
+                        {/* --- 3. GASTOS MENSUALES POR SECCIÓN (TABLA LARGA) --- */}
+                        <div className="panel overflow-hidden border-t-4 border-indigo-500">
+                             <h3 className="font-bold mb-4 text-indigo-400 uppercase text-sm tracking-wider">Desglose Mensual por Sección (2025)</h3>
+                             <div className="overflow-x-auto scrollbar-hide">
+                                <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-slate-900 text-gray-400 uppercase">
+                                        <tr>
+                                            <th className="p-2 sticky left-0 bg-slate-900 z-10">Sección</th>
+                                            {monthNames.map(m => <th key={m} className="p-2 text-right min-w-[60px]">{m}</th>)}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700 font-mono">
+                                        {Object.entries(sectionMonthly).map(([sec, months], idx) => (
+                                            <tr key={idx} className="hover:bg-slate-800/50">
+                                                <td className="p-2 font-sans font-bold text-slate-200 sticky left-0 bg-slate-800 z-10 border-r border-slate-600">{sec}</td>
+                                                {months.map((val, mIdx) => (
+                                                    <td key={mIdx} className={`p-2 text-right ${val === 0 ? 'text-gray-600' : 'text-white'}`}>
+                                                        {val > 0 ? `$${Math.round(val/1000)}k` : '-'}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                             </div>
+                        </div>
+
+                        {/* --- 4. GASTOS MENSUALES POR CATEGORÍA --- */}
+                        <div className="panel overflow-hidden border-t-4 border-orange-500">
+                             <h3 className="font-bold mb-4 text-orange-400 uppercase text-sm tracking-wider">Desglose Mensual por Categoría (2025)</h3>
+                             <div className="overflow-x-auto max-h-96">
+                                <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-slate-900 text-gray-400 uppercase sticky top-0 z-20">
+                                        <tr>
+                                            <th className="p-2 sticky left-0 bg-slate-900 z-30">Categoría</th>
+                                            {monthNames.map(m => <th key={m} className="p-2 text-right min-w-[70px]">{m}</th>)}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700 font-mono">
+                                        {Object.entries(categoryMonthly).sort().map(([cat, months], idx) => (
+                                            <tr key={idx} className="hover:bg-slate-800/50">
+                                                <td className="p-2 font-sans text-slate-300 sticky left-0 bg-slate-800 z-10 border-r border-slate-600">{cat}</td>
+                                                {months.map((val, mIdx) => (
+                                                    <td key={mIdx} className={`p-2 text-right ${val === 0 ? 'text-gray-700' : 'text-gray-300'}`}>
+                                                        {val > 0 ? val.toLocaleString() : '-'}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                             </div>
+                        </div>
+
+                        {/* Reloj Restante (Sin cambios) */}
                         <div className="panel bg-slate-900 border-2 border-red-900 shadow-xl relative overflow-hidden">
                             <div className="flex items-center gap-2 mb-6 border-b border-gray-800 pb-2"><i className="ri-flag-2-line text-red-500 text-xl"></i><h3 className="font-bold text-lg text-white">PROYECTO LIBERTAD</h3></div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
@@ -573,29 +739,15 @@
                                 </div>
                             </div>
                         </div>
-                        <div className="panel overflow-hidden">
-                            <h3 className="font-bold mb-4 text-blue-400 uppercase text-sm tracking-wider">Balance Táctico</h3>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm text-left border-collapse">
-                                    <thead className="bg-slate-900 text-xs text-gray-400 uppercase"><tr><th className="p-3">Sección</th><th className="p-3 text-right">Presupuesto</th><th className="p-3 text-right">Gastado</th><th className="p-3 text-right">Diferencia</th></tr></thead>
-                                    <tbody className="divide-y divide-slate-700 font-mono">
-                                        {sectionData.map((row, idx) => {
-                                            const isGood = row.name.includes('AHORRO') ? row.diff <= 0 : row.diff >= 0; 
-                                            return (<tr key={idx} className="hover:bg-slate-800/50"><td className="p-3 font-sans font-bold text-slate-200">{row.name}</td><td className="p-3 text-right text-gray-400">${row.limit.toLocaleString()}</td><td className="p-3 text-right text-white font-bold">${row.spent.toLocaleString()}</td><td className={`p-3 text-right font-bold ${isGood ? 'text-green-400' : 'text-red-400'}`}>{row.diff > 0 ? '+' : ''}{row.diff.toLocaleString()}</td></tr>);
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
                     </div>
                 );
             };
 
             const EditModal = () => { if (!editingItem) return null; const [val, setVal] = useState(editingItem.value); const [rate, setRate] = useState(editingItem.rate || 0); const [name, setName] = useState(editingItem.name); return (<div className="modal-overlay"><div className="modal-content animate-fade-in"><h3 className="font-bold text-xl mb-4 text-blue-400">Editar Detalle</h3><label className="block text-xs text-gray-400 mb-1">Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="input-dark mb-3" /><label className="block text-xs text-gray-400 mb-1">Saldo Total</label><input type="number" value={val} onChange={e => setVal(e.target.value)} className="input-dark mb-4 text-2xl font-mono" />{editingItem.itemType === 'debt' && (<><label className="block text-xs text-gray-400 mb-1">Tasa Interés (%)</label><input type="number" value={rate} onChange={e => setRate(e.target.value)} className="input-dark mb-4" /></>)}<div className="flex justify-end gap-2 mt-4"><button onClick={() => setEditingItem(null)} className="btn bg-slate-600 hover:bg-slate-500 text-white">Cancelar</button><button onClick={() => updateItem(editingItem.itemType, editingItem.id, val, rate, name)} className="btn btn-primary">Guardar</button></div></div></div>); };
-            const TransactionEditModal = () => { if (!editingTx) return null; const [amt, setAmt] = useState(editingTx.amount); const [cmt, setCmt] = useState(editingTx.comment); const [sec, setSec] = useState(editingTx.section || Object.keys(data.budgetConfig)[0]); const [cat, setCat] = useState(editingTx.category || editingTx.source); const [date, setDate] = useState(editingTx.date); const isIncome = editingTx.type === 'income'; return (<div className="modal-overlay"><div className="modal-content animate-fade-in"><h3 className="font-bold text-xl mb-4 text-yellow-400">Corregir Movimiento</h3><label className="block text-xs text-gray-400 mb-1">Fecha</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-dark mb-3" /><label className="block text-xs text-gray-400 mb-1">Monto</label><input type="number" value={amt} onChange={e => setAmt(e.target.value)} className="input-dark mb-3 text-xl font-mono" /><label className="block text-xs text-gray-400 mb-1">Comentario</label><input type="text" value={cmt} onChange={e => setCmt(e.target.value)} className="input-dark mb-3" /><div className="flex justify-end gap-2 mt-4"><button onClick={() => setEditingTx(null)} className="btn bg-slate-600 hover:bg-slate-500 text-white">Cancelar</button><button onClick={() => saveTransactionChanges(editingTx.id, editingTx.type, amt, cmt, cat, sec, date)} className="btn btn-primary">Guardar</button></div></div></div>); };
+            const TransactionEditModal = () => { if (!editingTx) return null; const [amt, setAmt] = useState(editingTx.amount); const [cmt, setCmt] = useState(editingTx.comment); const [sec, setSec] = useState(editingTx.section || Object.keys(safeData.budgetConfig)[0]); const [cat, setCat] = useState(editingTx.category || editingTx.source); const [date, setDate] = useState(editingTx.date); const isIncome = editingTx.type === 'income'; return (<div className="modal-overlay"><div className="modal-content animate-fade-in"><h3 className="font-bold text-xl mb-4 text-yellow-400">Corregir Movimiento</h3><label className="block text-xs text-gray-400 mb-1">Fecha</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-dark mb-3" /><label className="block text-xs text-gray-400 mb-1">Monto</label><input type="number" value={amt} onChange={e => setAmt(e.target.value)} className="input-dark mb-3 text-xl font-mono" /><label className="block text-xs text-gray-400 mb-1">Comentario</label><input type="text" value={cmt} onChange={e => setCmt(e.target.value)} className="input-dark mb-3" /><div className="flex justify-end gap-2 mt-4"><button onClick={() => setEditingTx(null)} className="btn bg-slate-600 hover:bg-slate-500 text-white">Cancelar</button><button onClick={() => saveTransactionChanges(editingTx.id, editingTx.type, amt, cmt, cat, sec, date)} className="btn btn-primary">Guardar</button></div></div></div>); };
             const PaymentModal = () => { if (!paymentItem) return null; const [amount, setAmount] = useState(""); const isAsset = paymentItem.type === 'asset'; return (<div className="modal-overlay"><div className="modal-content animate-fade-in border-t-4 border-yellow-500"><h3 className="font-bold text-xl mb-2 text-white">{isAsset ? '💰 Inyectar Ahorro' : '⚔️ Abonar a Deuda'}</h3><p className="text-sm text-gray-400 mb-4">{isAsset ? 'Sumar dinero a:' : 'Restar deuda a:'} <span className="text-white font-bold">{paymentItem.item.name}</span></p><label className="block text-xs text-gray-500 mb-1">Cantidad a {isAsset ? 'Ingresar' : 'Pagar'}</label><input type="number" autoFocus value={amount} onChange={e => setAmount(e.target.value)} className="input-dark mb-6 text-2xl font-mono text-center" placeholder="$0.00" /><div className="flex justify-end gap-2"><button onClick={() => setPaymentItem(null)} className="btn btn-ghost">Cancelar</button><button onClick={() => handlePayment(amount)} className={`btn ${isAsset ? 'btn-success' : 'btn-danger'}`}>{isAsset ? 'Sumar (+)' : 'Restar (-)'}</button></div></div></div>); };
-            const TargetDateModal = () => { if (!targetDateModalOpen) return null; const [tempDate, setTempDate] = useState(data.targetDate); return (<div className="modal-overlay"><div className="modal-content animate-fade-in border-t-4 border-red-500 max-w-sm"><h3 className="font-bold text-xl mb-4 text-white">📅 Fecha de Retiro</h3><input type="date" value={tempDate} onChange={(e) => setTempDate(e.target.value)} className="input-dark text-center text-xl mb-6" /><div className="flex justify-end gap-2"><button onClick={() => setTargetDateModalOpen(false)} className="btn btn-ghost">Cancelar</button><button onClick={() => updateTargetDate(tempDate)} className="btn btn-primary">Confirmar</button></div></div></div>); };
-            const BudgetConfigModal = () => { const [newCatName, setNewCatName] = useState(""); const [newCatLimit, setNewCatLimit] = useState(""); const [activeSectionForAdd, setActiveSectionForAdd] = useState(null); const [newSectionName, setNewSectionName] = useState(""); if (!configModalOpen) return null; return (<div className="modal-overlay"><div className="modal-content animate-fade-in max-w-2xl"><div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-2"><h3 className="font-bold text-2xl text-blue-400">⚙️ Configuración</h3><button onClick={() => setConfigModalOpen(false)} className="text-gray-400 hover:text-white"><i className="ri-close-line text-2xl"></i></button></div><div className="space-y-8">{Object.entries(data.budgetConfig).map(([secName, config]) => (<div key={secName} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700"><div className="flex justify-between items-center mb-4"><div className="flex items-center gap-2"><h4 className="font-bold text-lg text-white">{secName}</h4><button onClick={() => deleteBudgetSection(secName)} className="text-red-500 hover:text-red-300 text-xs"><i className="ri-delete-bin-line"></i></button></div><div className="flex items-center gap-2"><label className="text-xs text-gray-500">Límite:</label><input type="number" value={config.limit} onChange={(e) => updateBudgetSectionLimit(secName, e.target.value)} className="input-dark w-24 text-right font-mono text-blue-300 border-blue-900/50"/></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">{Object.entries(config.categories).map(([catName, limit]) => (<div key={catName} className="flex justify-between items-center bg-slate-900 p-2 rounded text-sm group"><span className="text-gray-300">{catName}</span><div className="flex items-center gap-2"><input type="number" value={limit} onChange={(e) => updateBudgetCategoryLimit(secName, catName, e.target.value)} className="input-dark w-20 text-right py-1 text-xs"/><button onClick={() => deleteBudgetCategory(secName, catName)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition"><i className="ri-close-circle-line"></i></button></div></div>))}</div><div className="flex gap-2 items-center mt-2 border-t border-slate-700 pt-2"><input placeholder={`Nueva categoría...`} className="input-dark text-xs flex-1" value={activeSectionForAdd === secName ? newCatName : ""} onChange={(e) => { setActiveSectionForAdd(secName); setNewCatName(e.target.value); }} onFocus={() => setActiveSectionForAdd(secName)}/><input type="number" placeholder="$" className="input-dark text-xs w-20" value={activeSectionForAdd === secName ? newCatLimit : ""} onChange={(e) => { setActiveSectionForAdd(secName); setNewCatLimit(e.target.value); }}/><button onClick={() => { addBudgetCategory(secName, newCatName, newCatLimit); setNewCatName(""); setNewCatLimit(""); }} className="btn btn-sm btn-primary"><i className="ri-add-line"></i></button></div></div>))}<div className="bg-slate-800/30 p-4 rounded-lg border border-dashed border-gray-600 flex justify-between items-center"><span className="text-sm font-bold text-gray-400">NUEVA SECCIÓN</span><div className="flex gap-2"><input placeholder="Nombre" className="input-dark text-sm w-48" value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)}/><button onClick={() => { addBudgetSection(newSectionName); setNewSectionName(""); }} className="btn btn-sm btn-success">Crear</button></div></div></div><div className="mt-8 flex justify-end"><button onClick={() => setConfigModalOpen(false)} className="btn btn-primary w-full md:w-auto">Guardar y Cerrar</button></div></div></div>); };
+            const TargetDateModal = () => { if (!targetDateModalOpen) return null; const [tempDate, setTempDate] = useState(safeData.targetDate); return (<div className="modal-overlay"><div className="modal-content animate-fade-in border-t-4 border-red-500 max-w-sm"><h3 className="font-bold text-xl mb-4 text-white">📅 Fecha de Retiro</h3><input type="date" value={tempDate} onChange={(e) => setTempDate(e.target.value)} className="input-dark text-center text-xl mb-6" /><div className="flex justify-end gap-2"><button onClick={() => setTargetDateModalOpen(false)} className="btn btn-ghost">Cancelar</button><button onClick={() => updateTargetDate(tempDate)} className="btn btn-primary">Confirmar</button></div></div></div>); };
+            const BudgetConfigModal = () => { const [newCatName, setNewCatName] = useState(""); const [newCatLimit, setNewCatLimit] = useState(""); const [activeSectionForAdd, setActiveSectionForAdd] = useState(null); const [newSectionName, setNewSectionName] = useState(""); if (!configModalOpen) return null; return (<div className="modal-overlay"><div className="modal-content animate-fade-in max-w-2xl"><div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-2"><h3 className="font-bold text-2xl text-blue-400">⚙️ Configuración</h3><button onClick={() => setConfigModalOpen(false)} className="text-gray-400 hover:text-white"><i className="ri-close-line text-2xl"></i></button></div><div className="space-y-8">{Object.entries(safeData.budgetConfig).map(([secName, config]) => (<div key={secName} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700"><div className="flex justify-between items-center mb-4"><div className="flex items-center gap-2"><h4 className="font-bold text-lg text-white">{secName}</h4><button onClick={() => deleteBudgetSection(secName)} className="text-red-500 hover:text-red-300 text-xs"><i className="ri-delete-bin-line"></i></button></div><div className="flex items-center gap-2"><label className="text-xs text-gray-500">Límite:</label><input type="number" value={config.limit} onChange={(e) => updateBudgetSectionLimit(secName, e.target.value)} className="input-dark w-24 text-right font-mono text-blue-300 border-blue-900/50"/></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">{Object.entries(config.categories).map(([catName, limit]) => (<div key={catName} className="flex justify-between items-center bg-slate-900 p-2 rounded text-sm group"><span className="text-gray-300">{catName}</span><div className="flex items-center gap-2"><input type="number" value={limit} onChange={(e) => updateBudgetCategoryLimit(secName, catName, e.target.value)} className="input-dark w-20 text-right py-1 text-xs"/><button onClick={() => deleteBudgetCategory(secName, catName)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition"><i className="ri-close-circle-line"></i></button></div></div>))}</div><div className="flex gap-2 items-center mt-2 border-t border-slate-700 pt-2"><input placeholder={`Nueva categoría...`} className="input-dark text-xs flex-1" value={activeSectionForAdd === secName ? newCatName : ""} onChange={(e) => { setActiveSectionForAdd(secName); setNewCatName(e.target.value); }} onFocus={() => setActiveSectionForAdd(secName)}/><input type="number" placeholder="$" className="input-dark text-xs w-20" value={activeSectionForAdd === secName ? newCatLimit : ""} onChange={(e) => { setActiveSectionForAdd(secName); setNewCatLimit(e.target.value); }}/><button onClick={() => { addBudgetCategory(secName, newCatName, newCatLimit); setNewCatName(""); setNewCatLimit(""); }} className="btn btn-sm btn-primary"><i className="ri-add-line"></i></button></div></div>))}<div className="bg-slate-800/30 p-4 rounded-lg border border-dashed border-gray-600 flex justify-between items-center"><span className="text-sm font-bold text-gray-400">NUEVA SECCIÓN</span><div className="flex gap-2"><input placeholder="Nombre" className="input-dark text-sm w-48" value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)}/><button onClick={() => { addBudgetSection(newSectionName); setNewSectionName(""); }} className="btn btn-sm btn-success">Crear</button></div></div></div><div className="mt-8 flex justify-end"><button onClick={() => setConfigModalOpen(false)} className="btn btn-primary w-full md:w-auto">Guardar y Cerrar</button></div></div></div>); };
             
             // --- SYNC MODAL ---
             const SyncModal = () => { 
@@ -634,7 +786,7 @@
                     {/* Navbar Lateral Desktop */}
                     <div className="hidden md:flex flex-col w-64 fixed inset-y-0 left-0 bg-slate-900 border-r border-slate-700 p-4">
                         <h1 className="text-2xl font-bold text-blue-500 mb-1 tracking-tighter">PLAN LOBO 🐺</h1>
-                        <p className="text-xs text-slate-500 mb-6">V7.5 Robusto</p>
+                        <p className="text-xs text-slate-500 mb-6">V7.7 Estrategia</p>
                         
                         {/* Status Nube */}
                         <div onClick={() => setSyncModalOpen(true)} className="mb-6 p-3 bg-slate-800 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-700 transition group">
@@ -689,5 +841,3 @@
     </script>
 </body>
 </html>
-
-
