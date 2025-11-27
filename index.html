@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plan Lobo - V7.7 Estrategia Maestra</title>
+    <title>Plan Lobo - V7.8 Estrategia Anual</title>
     
     <!-- LIBRERÍAS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -242,20 +242,15 @@
             );
         };
         
-        // --- NUEVA GRÁFICA MULTI-ANUAL ---
-        const MultiYearComparisonChart = ({ yearsData }) => {
-             // yearsData debe ser [{ year: 2025, income: X, expense: Y }, { year: 2026, ... }]
-             const maxIncome = Math.max(...yearsData.map(d => d.income));
-             const maxExpense = Math.max(...yearsData.map(d => d.expense));
+        // --- GRÁFICA MENSUAL (BAR CHART) ---
+        const MonthlyComparisonChart = ({ monthlyData }) => {
+             const maxIncome = Math.max(...monthlyData.map(d => d.income));
+             const maxExpense = Math.max(...monthlyData.map(d => d.expense));
              const maxVal = Math.max(maxIncome, maxExpense, 10000) * 1.15; 
              const height = 400; const width = 1200; 
              const paddingX = 60; const paddingY = 40;
              const chartW = width - (paddingX * 2); const chartH = height - (paddingY * 2);
-             
-             // Dynamic width logic in case of few years
-             const numYears = Math.max(yearsData.length, 5); // Minimum 5 slots to look good
-             const groupWidth = chartW / numYears;
-             const barWidth = groupWidth * 0.35;
+             const barWidth = (chartW / 12) * 0.35; const groupWidth = chartW / 12;
              
              return (
                 <div className="w-full overflow-x-auto bg-slate-900 rounded-lg p-2 border border-slate-700">
@@ -265,7 +260,7 @@
                              const y = paddingY + chartH - (chartH * tick);
                              return (<g key={tick}><line x1={paddingX} y1={y} x2={width - paddingX} y2={y} stroke="#334155" strokeWidth="1" strokeDasharray={tick === 0 ? "" : "4,4"} /><text x={paddingX - 10} y={y + 5} fill="#64748b" fontSize="14" textAnchor="end">${Math.round(maxVal * tick / 1000)}k</text></g>);
                          })}
-                        {yearsData.map((d, i) => {
+                        {monthlyData.map((d, i) => {
                             const xCenter = paddingX + (i * groupWidth) + (groupWidth / 2);
                             const hIncome = (d.income / maxVal) * chartH;
                             const hExpense = (d.expense / maxVal) * chartH;
@@ -279,14 +274,14 @@
                                     <rect x={xExpense} y={yBase - hExpense} width={barWidth} height={hExpense} fill="#ef4444" rx="4" className="chart-bar transition-opacity duration-200" />
                                     {hIncome > 20 && <text x={xIncome + barWidth/2} y={yBase - hIncome - 5} fill="#4ade80" fontSize="12" textAnchor="middle" fontWeight="bold">${Math.round(d.income/1000)}k</text>}
                                     {hExpense > 20 && <text x={xExpense + barWidth/2} y={yBase - hExpense - 5} fill="#f87171" fontSize="12" textAnchor="middle" fontWeight="bold">${Math.round(d.expense/1000)}k</text>}
-                                    <text x={xCenter} y={height - 10} fill="#cbd5e1" fontSize="16" textAnchor="middle" fontWeight="bold">{d.year}</text>
+                                    <text x={xCenter} y={height - 10} fill="#cbd5e1" fontSize="14" textAnchor="middle" fontWeight="bold">{d.month}</text>
                                 </g>
                             );
                         })}
                     </svg>
                     <div className="flex justify-center gap-6 mt-2 text-sm">
-                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded"></div> <span className="text-gray-300">Ingresos Totales</span></div>
-                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded"></div> <span className="text-gray-300">Gastos Totales</span></div>
+                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 rounded"></div> <span className="text-gray-300">Ingresos</span></div>
+                        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded"></div> <span className="text-gray-300">Gastos</span></div>
                     </div>
                 </div>
              );
@@ -536,33 +531,30 @@
             };
 
             const SummaryView = () => {
-                const currentYear = new Date().getFullYear();
+                const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+                const currentYearStr = selectedYear.toString();
                 
-                // --- 1. PREPARAR DATOS POR AÑO (HISTÓRICO) ---
-                const yearsMap = {};
-                // Inicializar 2025 para asegurar que aparezca
-                yearsMap[2025] = { year: 2025, income: 0, expense: 0 };
-                // Llenar con datos reales
+                // --- 1. PREPARAR DATOS MENSUALES PARA EL AÑO SELECCIONADO ---
+                const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+                const monthlyData = Array(12).fill(null).map((_, i) => ({ monthIndex: i, month: monthNames[i], income: 0, expense: 0 }));
+
                 (safeData.incomes || []).forEach(inc => {
-                    const y = parseInt(inc.date.split('-')[0]);
-                    if (y >= 2025) {
-                        if (!yearsMap[y]) yearsMap[y] = { year: y, income: 0, expense: 0 };
-                        yearsMap[y].income += inc.amount;
+                    if (inc.date.startsWith(currentYearStr)) {
+                        const m = parseInt(inc.date.split('-')[1]) - 1;
+                        if(m >=0 && m < 12) monthlyData[m].income += inc.amount;
                     }
                 });
                 (safeData.transactions || []).forEach(tx => {
-                    const y = parseInt(tx.date.split('-')[0]);
-                    if (y >= 2025) {
-                        if (!yearsMap[y]) yearsMap[y] = { year: y, income: 0, expense: 0 };
-                        yearsMap[y].expense += tx.amount;
+                    if (tx.date.startsWith(currentYearStr)) {
+                        const m = parseInt(tx.date.split('-')[1]) - 1;
+                        if(m >=0 && m < 12) monthlyData[m].expense += tx.amount;
                     }
                 });
-                const multiYearData = Object.values(yearsMap).sort((a,b) => a.year - b.year);
 
                 // --- 2. CÁLCULO DE PROMEDIOS (TABLA PROMEDIO_ANUAL) ---
                 const activeMonths = new Set();
-                (safeData.transactions || []).forEach(t => { if(t.date.startsWith('2025')) activeMonths.add(t.date.substring(0,7)); });
-                const monthsCount = Math.max(activeMonths.size, 1); // Evitar división por cero
+                (safeData.transactions || []).forEach(t => { if(t.date.startsWith(currentYearStr)) activeMonths.add(t.date.substring(0,7)); });
+                const monthsCount = Math.max(activeMonths.size, 1); 
 
                 const categoryAverages = {};
                 const sectionAverages = {};
@@ -575,16 +567,13 @@
                     });
                 });
 
-                // Sumar gastos 2025
-                (safeData.transactions || []).filter(t => t.date.startsWith('2025')).forEach(t => {
+                // Sumar gastos del año seleccionado
+                (safeData.transactions || []).filter(t => t.date.startsWith(currentYearStr)).forEach(t => {
                     if (sectionAverages[t.section]) sectionAverages[t.section].total += t.amount;
                     if (categoryAverages[t.category]) categoryAverages[t.category].total += t.amount;
                 });
 
                 // --- 3. DATOS MENSUALES POR SECCIÓN Y CATEGORÍA (TABLAS DETALLADAS) ---
-                const monthsList = ['01','02','03','04','05','06','07','08','09','10','11','12'];
-                const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-                
                 const sectionMonthly = {};
                 const categoryMonthly = {};
 
@@ -596,8 +585,8 @@
                     });
                 });
 
-                // Llenar datos mensuales 2025
-                (safeData.transactions || []).filter(t => t.date.startsWith('2025')).forEach(t => {
+                // Llenar datos mensuales
+                (safeData.transactions || []).filter(t => t.date.startsWith(currentYearStr)).forEach(t => {
                     const mIndex = parseInt(t.date.split('-')[1]) - 1;
                     if (sectionMonthly[t.section]) sectionMonthly[t.section][mIndex] += t.amount;
                     if (categoryMonthly[t.category]) categoryMonthly[t.category][mIndex] += t.amount;
@@ -606,29 +595,30 @@
                 const targetDate = new Date(safeData.targetDate); const now = new Date(); const daysRemaining = Math.max(0, Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24))); const summersRemaining = Math.max(0, Math.floor(daysRemaining / 365));
                 
                 const exportAnnualReport = () => { 
-                    /* Simplified Export Logic */ 
-                    const wsData = [ ["AÑO", "INGRESOS", "GASTOS"], ...multiYearData.map(d => [d.year, d.income, d.expense]) ]; 
+                    const wsData = [ ["MES", "INGRESOS", "GASTOS"], ...monthlyData.map(d => [d.month, d.income, d.expense]) ]; 
                     const ws = XLSX.utils.aoa_to_sheet(wsData); 
                     const wb = XLSX.utils.book_new(); 
-                    XLSX.utils.book_append_sheet(wb, ws, `Estrategia`); 
-                    XLSX.writeFile(wb, `PlanLobo_Estrategia.xlsx`); 
+                    XLSX.utils.book_append_sheet(wb, ws, `Estrategia_${selectedYear}`); 
+                    XLSX.writeFile(wb, `PlanLobo_Estrategia_${selectedYear}.xlsx`); 
                 };
 
                 return (
                     <div className="space-y-6 animate-fade-in">
                         <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 mb-6">
-                            <div className="text-center w-full"><div className="text-xs text-yellow-400 font-bold tracking-widest uppercase">Estrategia de Largo Plazo</div><div className="text-2xl font-bold text-white uppercase">VISIÓN {currentYear}+</div></div>
+                            <button onClick={() => setSelectedYear(y => y - 1)} className="btn btn-ghost"><i className="ri-arrow-left-s-line text-xl"></i></button>
+                            <div className="text-center w-full"><div className="text-xs text-yellow-400 font-bold tracking-widest uppercase">Estrategia Anual</div><div className="text-2xl font-bold text-white uppercase">{selectedYear}</div></div>
+                            <button onClick={() => setSelectedYear(y => y + 1)} className="btn btn-ghost"><i className="ri-arrow-right-s-line text-xl"></i></button>
                         </div>
 
-                        {/* --- 1. GRÁFICA MULTI-ANUAL --- */}
+                        {/* --- 1. GRÁFICA MENSUAL DINÁMICA --- */}
                         <div className="panel border-t-4 border-blue-500">
-                            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><i className="ri-bar-chart-grouped-line text-blue-400"></i> Balance Histórico (Por Años)</h3><button onClick={exportAnnualReport} className="btn bg-green-700 hover:bg-green-600 text-white text-xs"><i className="ri-file-excel-2-line"></i></button></div>
-                            <div className="mb-6"><MultiYearComparisonChart yearsData={multiYearData} /></div>
+                            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><i className="ri-bar-chart-grouped-line text-blue-400"></i> Balance Mensual {selectedYear}</h3><button onClick={exportAnnualReport} className="btn bg-green-700 hover:bg-green-600 text-white text-xs"><i className="ri-file-excel-2-line"></i></button></div>
+                            <div className="mb-6"><MonthlyComparisonChart monthlyData={monthlyData} /></div>
                         </div>
 
                         {/* --- 2. PROMEDIOS ANUALES --- */}
                         <div className="panel overflow-hidden border-l-4 border-purple-500">
-                            <h3 className="font-bold mb-4 text-purple-400 uppercase text-sm tracking-wider">Promedios 2025 vs Presupuesto</h3>
+                            <h3 className="font-bold mb-4 text-purple-400 uppercase text-sm tracking-wider">Promedios {selectedYear} vs Presupuesto</h3>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* Tabla Secciones */}
                                 <div>
@@ -647,7 +637,7 @@
                                         </table>
                                     </div>
                                 </div>
-                                {/* Tabla Top Categorías (Resumida para no saturar) */}
+                                {/* Tabla Top Categorías */}
                                 <div>
                                     <h4 className="text-xs text-gray-400 font-bold mb-2 uppercase">Top Desviaciones (Categorías)</h4>
                                     <div className="overflow-x-auto">
@@ -656,8 +646,8 @@
                                             <tbody className="divide-y divide-slate-700 font-mono text-xs">
                                                 {Object.entries(categoryAverages)
                                                     .map(([cat, data]) => ({ cat, avg: data.total/monthsCount, budget: data.budget, diff: data.budget - (data.total/monthsCount) }))
-                                                    .sort((a,b) => Math.abs(b.diff) - Math.abs(a.diff)) // Ordenar por mayor impacto
-                                                    .slice(0, 6) // Solo mostrar las 6 más críticas
+                                                    .sort((a,b) => Math.abs(b.diff) - Math.abs(a.diff))
+                                                    .slice(0, 6) 
                                                     .map((row, idx) => {
                                                         const isGood = row.diff >= 0; 
                                                         return (<tr key={idx} className="hover:bg-slate-800/50"><td className="p-2 font-sans text-slate-300">{row.cat}</td><td className="p-2 text-right text-white">${row.avg.toLocaleString(undefined, {maximumFractionDigits:0})}</td><td className={`p-2 text-right font-bold ${isGood ? 'text-green-400' : 'text-red-400'}`}>{row.diff > 0 ? '+' : ''}{row.diff.toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>);
@@ -669,9 +659,9 @@
                             </div>
                         </div>
 
-                        {/* --- 3. GASTOS MENSUALES POR SECCIÓN (TABLA LARGA) --- */}
+                        {/* --- 3. GASTOS MENSUALES POR SECCIÓN --- */}
                         <div className="panel overflow-hidden border-t-4 border-indigo-500">
-                             <h3 className="font-bold mb-4 text-indigo-400 uppercase text-sm tracking-wider">Desglose Mensual por Sección (2025)</h3>
+                             <h3 className="font-bold mb-4 text-indigo-400 uppercase text-sm tracking-wider">Desglose Mensual por Sección ({selectedYear})</h3>
                              <div className="overflow-x-auto scrollbar-hide">
                                 <table className="w-full text-xs text-left border-collapse">
                                     <thead className="bg-slate-900 text-gray-400 uppercase">
@@ -698,7 +688,7 @@
 
                         {/* --- 4. GASTOS MENSUALES POR CATEGORÍA --- */}
                         <div className="panel overflow-hidden border-t-4 border-orange-500">
-                             <h3 className="font-bold mb-4 text-orange-400 uppercase text-sm tracking-wider">Desglose Mensual por Categoría (2025)</h3>
+                             <h3 className="font-bold mb-4 text-orange-400 uppercase text-sm tracking-wider">Desglose Mensual por Categoría ({selectedYear})</h3>
                              <div className="overflow-x-auto max-h-96">
                                 <table className="w-full text-xs text-left border-collapse">
                                     <thead className="bg-slate-900 text-gray-400 uppercase sticky top-0 z-20">
@@ -723,7 +713,7 @@
                              </div>
                         </div>
 
-                        {/* Reloj Restante (Sin cambios) */}
+                        {/* Reloj Restante */}
                         <div className="panel bg-slate-900 border-2 border-red-900 shadow-xl relative overflow-hidden">
                             <div className="flex items-center gap-2 mb-6 border-b border-gray-800 pb-2"><i className="ri-flag-2-line text-red-500 text-xl"></i><h3 className="font-bold text-lg text-white">PROYECTO LIBERTAD</h3></div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
@@ -786,7 +776,7 @@
                     {/* Navbar Lateral Desktop */}
                     <div className="hidden md:flex flex-col w-64 fixed inset-y-0 left-0 bg-slate-900 border-r border-slate-700 p-4">
                         <h1 className="text-2xl font-bold text-blue-500 mb-1 tracking-tighter">PLAN LOBO 🐺</h1>
-                        <p className="text-xs text-slate-500 mb-6">V7.7 Estrategia</p>
+                        <p className="text-xs text-slate-500 mb-6">V7.8 Estrategia Anual</p>
                         
                         {/* Status Nube */}
                         <div onClick={() => setSyncModalOpen(true)} className="mb-6 p-3 bg-slate-800 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-700 transition group">
